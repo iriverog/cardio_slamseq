@@ -118,7 +118,7 @@ ggplot(df, aes(x = Sample,
   theme(legend.position = "none")
 #dev.off()
 ```
-```{r MultiMappedReadsPrecent}
+```{r MultiMappedReadsPercent}
 #pdf(file.path(fig_path,
 #              "AlignedReads_SlamSeqTest_PercentageMultimappingReads.pdf"), 
 #    width = 3, height = 3)
