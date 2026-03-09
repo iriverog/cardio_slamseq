@@ -18,7 +18,7 @@ library(ggplot2)
 knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
 
 data_path <- "data"
-fig_path  <- "figures/01_preprocessing"
+fig_path  <- "figures/01_preprocessing/STAR_stats"
 ```
 
 ```{r prep_data, include=FALSE}
