@@ -389,7 +389,7 @@ ggplot(Stacked_Reads_DF, aes(x = Sample,
 ```
 ```{r MismatchPerBase}
 #pdf(file.path(fig_path,
-#              "AlignedReads_MismatchRatePerBas.pdf"), 
+#              "AlignedReads_MismatchRatePerBase.pdf"), 
 #    width = 3.5, height = 3)
 
 ggplot(df, aes(x = Condition, 
