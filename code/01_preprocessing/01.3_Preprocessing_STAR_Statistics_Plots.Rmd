@@ -1,0 +1,411 @@
+---
+title: "SLAM-Seq mapping statistics"
+author: "Inés Rivero-García"
+date: "9/22/2023"
+output: 
+  html_document:
+    theme: cerulean
+    number_sections: true
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+```{r setup}
+library(ggplot2)
+
+# set project root for the notebook
+knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
+
+data_path <- "data"
+fig_path  <- "figures/01_preprocessing"
+```
+
+```{r prep_data, include=FALSE}
+df <- read.csv(file.path(data_path, "metadata.csv"),
+                 header = TRUE, 
+                 sep = "\t")
+
+# Remove test batch
+df <- df[df$Experimental_batch != "0 (06/06/2022)",]
+df$Condition <- factor(as.character(df$Condition), levels = c("Null", "GFP", "caERBB2", "MYC", "YAP5SA"))
+
+colors <- c("#BBBBBB", "#117733", "#DDAA33", "#EE6677", "#AA3377") 
+names(colors) <- levels(df$Condition)
+```
+
+
+# Alignment statistics (STAR)
+```{r nrRawReads}
+#pdf(file.path(fig_path,
+#              "AlignedReads_NrRawReads.pdf"), 
+#    width = 3.5, height = 3)
+ggplot(df, aes(x = Condition, 
+               y = Nr_reads, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 160), 
+                     breaks = c(0, 25, 50, 75, 100, 125, 150)) +
+  xlab("") +
+  ylab("Number of raw reads (Millions)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r UniquelyMappedReads}
+#pdf(file.path(fig_path,
+#              "AlignedReads_NrUniquelyMappingReads.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Nr_uniquely_mapped_reads/10^6,
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 160), 
+                     breaks = c(0, 25, 50, 75, 100, 125, 150)) +
+  xlab("") +
+  ylab("Nr uniquely mapped reads (Millions)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r UniquelyMappedReadsPercent}
+#pdf(file.path(fig_path,
+#              "AlignedReads_PercentageUniquelyMappingReads.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Percent_uniquely_mapped_reads,
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 100), 
+                     breaks = c(0, 20, 40, 60, 80, 100)) +
+  xlab("") +
+  ylab("Percentage of uniquely mapped reads") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r MultiMappedReads}
+#pdf(file.path(fig_path,
+#              "AlignedReads_NrMultiMappingReads.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Nr_multimapping_reads/10^6, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 25), 
+                     breaks = c(0, 5, 10, 15, 20, 25)) +
+  xlab("") +
+  ylab("Nr multi-mapping reads (Millions)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r MultiMappedReadsPercent}
+#pdf(file.path(fig_path,
+#              "AlignedReads_PercentageMultiMappingReads.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Percent_multimapping_reads, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 20), 
+                     breaks = c(0, 5, 10, 15, 20)) +
+  xlab("") +
+  ylab("Percentage of multi-mapping reads") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r TooManyLoci}
+#pdf(file.path(fig_path,
+#              "AlignedReads_NrReadsTooManyLoci.pdf"), 
+#    width = 3.5, height = 3.5)
+
+ggplot(df, aes(x = Condition, 
+               y = Nr_reads_mapping_too_many_loci/10^6, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1)) +
+  xlab("") +
+  ylab("Nr unmapped reads (too many loci) (Millions)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r TooManyLociPercentage}
+#pdf(file.path(fig_path,
+#              "AlignedReads_PercentageReadsTooManyLoci.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Percent_reads_mapping_too_many_loci, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1)) +
+  xlab("") +
+  ylab("Percentage of unmapped reads\n(too many loci)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r MismatchesUnmapped}
+#pdf(file.path(fig_path,
+#              "AlignedReads_NrReadsTooManyMismatches.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Nr_unmaped_reads_mismatches/10^6,
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 1.03), 
+                     breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1)) +
+  xlab("") +
+  ylab("Nr unmapped reads\n(too many mismatches) (Millions)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r MismatchesUnmappedPercent}
+#pdf(file.path(fig_path,
+#              "AlignedReads_PercentageReadsTooManyMismatches.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Percent_unmapped_reads_mismatches,
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 1), 
+                     breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1)) +
+  xlab("") +
+  ylab("Percentage of unmapped reads\n(too many mismatches)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r ShortUnmapped}
+#pdf(file.path(fig_path,
+#              "AlignedReads_NrReadsTooShort.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Nr_unmaped_reads_short/10^6, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0,9), 
+                     breaks = c(0, 2, 4, 6, 8)) +
+  xlab("") +
+  ylab("Nr unmapped reads\n(too short) (Millions)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r ShortUnmappedPercent}
+#pdf(file.path(fig_path,
+#              "AlignedReads_PercentageReadsTooShort.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Percent_unmapped_reads_short, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0, 15), 
+                     breaks = c(0, 2, 4, 6, 8, 10, 12, 14)) +
+  xlab("") +
+  ylab("Percentage of unmapped reads\n(too short)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r OtherUnmapped}
+#pdf(file.path(fig_path,
+#              "AlignedReads_NrReadsUnmapedOtherReasons.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Nr_unmapped_reads_other/10^6, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  xlab("") +
+  ylab("Nr unmapped reads\n(other reasons) (Millions)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r OtherUnmappedPercent}
+#pdf(file.path(fig_path,
+#              "AlignedReads_PercentageReadsUnmapedOtherReasons.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Percent_unmapped_reads_other, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  xlab("") +
+  ylab("Percentage of unmapped reads\n(other reasons)") +
+  theme(legend.position = "none")
+#dev.off()
+```
+```{r StackedNrReads}
+Stacked_Reads_DF <- df[, c("Sample", 
+                           "Nr_uniquely_mapped_reads", 
+                          "Nr_multimapping_reads",
+                          "Nr_reads_mapping_too_many_loci",
+                          "Nr_unmaped_reads_mismatches",
+                          "Nr_unmaped_reads_short",
+                          "Nr_unmapped_reads_other")]
+Stacked_Reads_DF <- reshape2::melt(Stacked_Reads_DF)
+
+#pdf(file.path(fig_path,
+#              "AlignedReads_NrReadsPerCategory.pdf"), 
+#    width = 5.5, height = 3)
+
+ggplot(Stacked_Reads_DF, aes(x = Sample, 
+                             y = value, 
+                             fill = variable)) + 
+  geom_bar(position="stack", 
+           stat="identity", 
+           width = 0.5) +
+  theme_classic() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Purples", 
+                    direction = -1,
+                    labels = c("Uniquely mapping", 
+                               "Multi-mapping",
+                               "Unmaped: too many loci",
+                               "Unmaped: too many mismatches",
+                               "Unmapped: too short",
+                               "Unmapped: other reasons"))+
+  ylab("Number of reads (Millions)") +
+  theme(legend.position = "right")
+#dev.off()
+```
+```{r StackedNrReadsPercent}
+#pdf(file.path(fig_path,
+#              "AlignedReads_PercentageReadsPerCategory.pdf"), 
+#    width = 5, height = 3)
+
+ggplot(Stacked_Reads_DF, aes(x = Sample, 
+                             y = value, 
+                             fill = variable)) + 
+  geom_bar(position="fill", stat="identity", 
+           width = 0.5) +
+  theme_classic() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Purples", 
+                    direction = -1,
+                    labels = c("Uniquely mapping", 
+                               "Multi-mapping",
+                               "Unmaped: too many loci",
+                               "Unmaped: too many mismatches",
+                               "Unmapped: too short",
+                               "Unmapped: other reasons"))+
+  ylab("Proportion of reads") +
+  theme(legend.position = "right")
+#dev.off()
+```
+```{r MismatchPerBase}
+#pdf(file.path(fig_path,
+#              "AlignedReads_MismatchRatePerBas.pdf"), 
+#    width = 3.5, height = 3)
+
+ggplot(df, aes(x = Condition, 
+               y = Percent_mismatch_per_base, 
+               fill = Condition, 
+               color = Condition)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.75) +
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", 
+               width=0.25, alpha = 0.5)+
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  scale_y_continuous(limits = c(0,2)) +
+  xlab("") +
+  ylab("% mismatches per nucleotide") +
+  theme(legend.position = "none")
+#dev.off()
+```
