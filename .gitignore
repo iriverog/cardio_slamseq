@@ -47,3 +47,6 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Old scripts
+01.2_Preprocessing_STAR_Mapping.sh
