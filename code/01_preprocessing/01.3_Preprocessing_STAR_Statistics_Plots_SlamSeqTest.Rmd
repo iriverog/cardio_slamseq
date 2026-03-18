@@ -1,7 +1,7 @@
 ---
 title: "SLAM-Seq mapping statistics (SLAM-seq test)"
 author: "Inés Rivero-García"
-date: "9/22/2023"
+date: "03/18/2026"
 output: 
   html_document:
     theme: cerulean
@@ -13,37 +13,105 @@ output:
 
 ```{r setup}
 library(ggplot2)
+library(dplyr)
 
 # set project root for the notebook
 knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
 
 data_path <- "data"
+aligned_reads_path <- file.path(data_path, "Aligned.Reads")
 fig_path  <- "figures/01_preprocessing/STAR_stats"
 ```
 
-```{r prep_data, include=FALSE}
-df <- read.csv(file.path(data_path, "metadata.csv"),
-                 header = TRUE, 
-                 sep = "\t")
+```{r prep_data}
+metadata <- read.csv(
+  file.path(data_path, "metadata.csv"),
+  header = TRUE,
+  stringsAsFactors = FALSE
+)
 
-df <- df[df$Experimental_batch == "0 (06/06/2022)",]
-colors <- c("#BBBBBB", "#FA8072", "#FF0800", "#420D09") 
-names(colors) <- unique(df$Sample)
+metadata_batch0 <- metadata[metadata$Experimental_batch == 0, , drop = FALSE]
 
-df$Sample <- factor(df$Sample, levels = c("Null_0", "6hours", "12hours", "24hours"))
+sample_levels <- metadata_batch0 %>% pull(Sample)
+
+find_star_log <- function(sample_name) {
+  matching_files <- list.files(
+    aligned_reads_path,
+    pattern = paste0("^", sample_name, "_.*Log\\.final\\.out$"),
+    full.names = TRUE
+  )
+
+  if (length(matching_files) != 1) {
+    stop("Expected exactly one STAR log for sample '", sample_name, "', found ", length(matching_files),".")
+  }
+
+  return(matching_files)
+}
+
+parse_star_log <- function(log_file) {
+  log_table <- read.delim(
+    log_file,
+    sep = "|",
+    header = FALSE,
+    stringsAsFactors = FALSE,
+    fill = TRUE,
+    strip.white = TRUE,
+    quote = ""
+  )
+
+  metric_names <- trimws(log_table[[1]])
+  metric_values <- trimws(log_table[[2]])
+  stats <- setNames(metric_values, metric_names)
+
+  parse_number <- function(metric_name) {
+    as.numeric(gsub("%", "", stats[[metric_name]], fixed = TRUE))
+  }
+
+  data.frame(
+    Nr_reads = parse_number("Number of input reads"),
+    Nr_uniquely_mapped_reads = parse_number("Uniquely mapped reads number"),
+    Percent_uniquely_mapped_reads = parse_number("Uniquely mapped reads %"),
+    Nr_multimapping_reads = parse_number("Number of reads mapped to multiple loci"),
+    Percent_multimapping_reads = parse_number("% of reads mapped to multiple loci"),
+    Nr_reads_mapping_too_many_loci = parse_number("Number of reads mapped to too many loci"),
+    Percent_reads_mapping_too_many_loci = parse_number("% of reads mapped to too many loci"),
+    Nr_unmaped_reads_mismatches = parse_number("Number of reads unmapped: too many mismatches"),
+    Percent_unmapped_reads_mismatches = parse_number("% of reads unmapped: too many mismatches"),
+    Nr_unmaped_reads_short = parse_number("Number of reads unmapped: too short"),
+    Percent_unmapped_reads_short = parse_number("% of reads unmapped: too short"),
+    Nr_unmapped_reads_other = parse_number("Number of reads unmapped: other"),
+    Percent_unmapped_reads_other = parse_number("% of reads unmapped: other"),
+    Percent_mismatch_per_base = parse_number("Mismatch rate per base, %"),
+    stringsAsFactors = FALSE
+  )
+}
+
+df <- do.call(
+  rbind,
+  lapply(sample_levels, function(sample_name) {
+    sample_stats <- parse_star_log(find_star_log(sample_name))
+    data.frame(
+      Sample = sample_name,
+      sample_stats,
+      stringsAsFactors = FALSE
+    )
+  })
+)
+
+colors <- c("#BBBBBB", "#FA8072", "#FF0800", "#420D09")
+names(colors) <- sample_levels
+
+df$Sample <- factor(df$Sample, levels = sample_levels)
+df <- df[order(df$Sample), ]
 ```
 
 # Alignment statistics (STAR)
 ```{r nrRawReads}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_NrRawReads.pdf"), 
-#    width = 3, height = 3)
-ggplot(df, aes(x = Sample, 
-               y = Nr_reads, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+nr_reads_plt <- ggplot(df, aes(x = Sample,
+                               y = Nr_reads/10^6,
+                               fill = Sample,
+                               color = Sample)) +
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -52,19 +120,19 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Number of raw reads (Millions)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_NrRawReads.pdf"), width = 3, height = 3)
+nr_reads_plt
+dev.off()
+
+nr_reads_plt
 ```
 ```{r UniquelyMappedReads}
-#pdf(file.path(fig_path,
-              #"AlignedReads_SlamSeqTest_NrUniquelyMappingReads.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Nr_uniquely_mapped_reads/10^6,
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+nr_uniqmap_plt <- ggplot(df, aes(x = Sample,
+                                 y = Nr_uniquely_mapped_reads/10^6,
+                                 fill = Sample,
+                                 color = Sample)) +
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -73,20 +141,20 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Nr uniquely mapped reads (Millions)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_NrUniquelyMappingReads.pdf"), width = 3, height = 3)
+nr_uniqmap_plt
+dev.off()
+
+nr_uniqmap_plt
 ```
 
 ```{r UniquelyMappedReadsPercent}
-#pdf(file.path(fig_path,
-              #"AlignedReads_SlamSeqTest_PercentageUniquelyMappingReads.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Percent_uniquely_mapped_reads,
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+pct_uniqmap_plt <- ggplot(df, aes(x = Sample,
+                                  y = Percent_uniquely_mapped_reads,
+                                  fill = Sample,
+                                  color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -95,19 +163,19 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Percentage of uniquely mapped reads") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_PercentageUniquelyMappingReads.pdf"), width = 3, height = 3)
+pct_uniqmap_plt
+dev.off()
+
+pct_uniqmap_plt
 ```
 ```{r MultiMappedReads}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_NrMultimappingReads.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Nr_multimapping_reads/10^6, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+nr_multimap_plt <- ggplot(df, aes(x = Sample,
+                                  y = Nr_multimapping_reads/10^6,
+                                  fill = Sample,
+                                  color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -116,19 +184,19 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Nr multi-mapping reads (Millions)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_NrMultimappingReads.pdf"), width = 3, height = 3)
+nr_multimap_plt
+dev.off()
+
+nr_multimap_plt
 ```
 ```{r MultiMappedReadsPercent}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_PercentageMultimappingReads.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Percent_multimapping_reads, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+pct_multimap_plt <- ggplot(df, aes(x = Sample, 
+                                   y = Percent_multimapping_reads, 
+                                   fill = Sample, 
+                                   color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -137,19 +205,19 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Percentage of multi-mapping reads") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_PercentageMultimappingReads.pdf"), width = 3, height = 3)
+pct_multimap_plt
+dev.off()
+
+pct_multimap_plt
 ```
 ```{r TooManyLoci}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_NrReadsTooManyLoci.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Nr_reads_mapping_too_many_loci/10^6, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+nr_manyloci_plt <- ggplot(df, aes(x = Sample,
+                                  y = Nr_reads_mapping_too_many_loci/10^6,
+                                  fill = Sample,
+                                  color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -158,19 +226,19 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Nr unmapped reads (too many loci) (Millions)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_NrReadsTooManyLoci.pdf"), width = 3, height = 3)
+nr_manyloci_plt
+dev.off()
+
+nr_manyloci_plt
 ```
 ```{r TooManyLociPercentage}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_PercentageReadsTooManyLoci.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Percent_reads_mapping_too_many_loci, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+pct_manyloci_plt <- ggplot(df, aes(x = Sample,
+                                   y = Percent_reads_mapping_too_many_loci,
+                                   fill = Sample,
+                                   color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -179,19 +247,19 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Percentage of unmapped reads\n(too many loci)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_PercentageReadsTooManyLoci.pdf"), width = 3, height = 3)
+pct_manyloci_plt
+dev.off()
+
+pct_manyloci_plt
 ```
 ```{r MismatchesUnmapped}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_NrReadsTooManyMismatches.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Nr_unmaped_reads_mismatches/10^6,
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+nr_mismatch_plt <- ggplot(df, aes(x = Sample,
+                                  y = Nr_unmaped_reads_mismatches/10^6,
+                                  fill = Sample,
+                                  color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -200,19 +268,19 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Nr unmapped reads\n(too many mismatches) (Millions)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_NrReadsTooManyMismatches.pdf"), width = 3, height = 3)
+nr_mismatch_plt
+dev.off()
+
+nr_mismatch_plt
 ```
 ```{r MismatchesUnmappedPercent}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_PercentageReadsTooManyMismatches.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Percent_unmapped_reads_mismatches,
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+pct_mismatch_plt <- ggplot(df, aes(x = Sample,
+                                   y = Percent_unmapped_reads_mismatches,
+                                   fill = Sample,
+                                   color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -221,19 +289,19 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Percentage of unmapped reads\n(too many mismatches)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_PercentageReadsTooManyMismatches.pdf"), width = 3, height = 3)
+pct_mismatch_plt
+dev.off()
+
+pct_mismatch_plt
 ```
 ```{r ShortUnmapped}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_NrReadsTooShort.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Nr_unmaped_reads_short/10^6, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5)+
+nr_short_plt <- ggplot(df, aes(x = Sample,
+                               y = Nr_unmaped_reads_short/10^6,
+                               fill = Sample,
+                               color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5)+
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -242,17 +310,18 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Nr unmapped reads\n(too short) (Millions)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_NrReadsTooShort.pdf"),width = 3, height = 3)
+nr_short_plt
+dev.off()
+
+nr_short_plt
 ```
 ```{r ShortUnmappedPercent}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_PercentReadsTooShort.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Percent_unmapped_reads_short, 
-               fill = Sample, 
-               color = Sample)) + 
+pct_short_plt <- ggplot(df, aes(x = Sample,
+                                y = Percent_unmapped_reads_short,
+                                fill = Sample,
+                                color = Sample)) + 
   geom_bar(stat = "identity", 
            width = 0.5) +
   theme_classic() +
@@ -263,66 +332,65 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("Percentage of unmapped reads\n(too short)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_PercentageReadsTooShort.pdf"), width = 3, height = 3)
+pct_short_plt
+dev.off()
+
+pct_short_plt
 ```
 ```{r OtherUnmapped}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_NrReadsUnmappedOtherReasons.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Nr_unmapped_reads_other/10^6, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+nr_otherunamp_plt <- ggplot(df, aes(x = Sample, 
+                               y = Nr_unmapped_reads_other/10^6,
+                               fill = Sample,
+                               color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
   xlab("") +
   ylab("Nr unmapped reads\n(other reasons) (Millions)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_NrReadsUnmappedOtherReasons.pdf"), width = 3, height = 3)
+nr_otherunamp_plt
+dev.off()
+
+nr_otherunamp_plt
 ```
 ```{r OtherUnmappedPercent}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_PercentageReadsUnmappedOtherReasons.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Percent_unmapped_reads_other, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+pct_otherunmapped_plt <- ggplot(df, aes(x = Sample,
+                                        y = Percent_unmapped_reads_other, 
+                                        fill = Sample, 
+                                        color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
   xlab("") +
   ylab("Percentage of unmapped reads\n(other reasons)") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_PercentageReadsUnmappedOtherReasons.pdf"), width = 3, height = 3)
+pct_otherunmapped_plt
+dev.off()
+
+pct_otherunmapped_plt
 ```
 ```{r StackedNrReads}
 Stacked_Reads_DF <- df[, c("Sample", 
                            "Nr_uniquely_mapped_reads", 
-                          "Nr_multimapping_reads",
-                          "Nr_reads_mapping_too_many_loci",
-                          "Nr_unmaped_reads_mismatches",
-                          "Nr_unmaped_reads_short",
-                          "Nr_unmapped_reads_other")]
+                           "Nr_multimapping_reads",
+                           "Nr_reads_mapping_too_many_loci",
+                           "Nr_unmaped_reads_mismatches",
+                           "Nr_unmaped_reads_short",
+                           "Nr_unmapped_reads_other")]
 Stacked_Reads_DF <- reshape2::melt(Stacked_Reads_DF)
 
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_NrReadsPerCategory.pdf"), 
-#    width = 5, height = 3)
-
-ggplot(Stacked_Reads_DF, aes(x = Sample, 
-                             y = value, 
-                             fill = variable)) + 
-  geom_bar(position="stack", 
-           stat="identity", 
-           width = 0.5) +
+nr_reads_plt <- ggplot(Stacked_Reads_DF, aes(x = Sample, 
+                                             y = value, 
+                                             fill = variable)) + 
+  geom_bar(position = "stack", stat = "identity", width = 0.5) +
   theme_classic() +
   coord_flip() +
   scale_fill_brewer(palette = "Purples", 
@@ -332,21 +400,21 @@ ggplot(Stacked_Reads_DF, aes(x = Sample,
                                "Unmaped: too many loci",
                                "Unmaped: too many mismatches",
                                "Unmapped: too short",
-                               "Unmapped: other reasons"))+
+                               "Unmapped: other reasons")) +
   ylab("Number of reads (Millions)") +
   theme(legend.position = "right")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_NrReadsPerCategory.pdf"), width = 5, height = 3)
+nr_reads_plt
+dev.off()
+
+nr_reads_plt
 ```
 ```{r StackedNrReadsPercent}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_PercentageReadsPerCategory.pdf"), 
-#    width = 5, height = 3)
-
-ggplot(Stacked_Reads_DF, aes(x = Sample, 
-                             y = value, 
-                             fill = variable)) + 
-  geom_bar(position="fill", stat="identity", 
-           width = 0.5) +
+pct_reads_plt <- ggplot(Stacked_Reads_DF, aes(x = Sample, 
+                                              y = value,
+                                              fill = variable)) + 
+  geom_bar(position = "fill", stat = "identity", width = 0.5) +
   theme_classic() +
   coord_flip() +
   scale_fill_brewer(palette = "Purples", 
@@ -356,22 +424,22 @@ ggplot(Stacked_Reads_DF, aes(x = Sample,
                                "Unmaped: too many loci",
                                "Unmaped: too many mismatches",
                                "Unmapped: too short",
-                               "Unmapped: other reasons"))+
+                               "Unmapped: other reasons")) +
   ylab("Proportion of reads") +
   theme(legend.position = "right")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_PercentageReadsPerCategory.pdf"), width = 5, height = 3)
+pct_reads_plt
+dev.off()
+
+pct_reads_plt
 ```
 ```{r MismatchPerBase}
-#pdf(file.path(fig_path,
-#              "AlignedReads_SlamSeqTest_MismatchRatePerBase.pdf"), 
-#    width = 3, height = 3)
-
-ggplot(df, aes(x = Sample, 
-               y = Percent_mismatch_per_base, 
-               fill = Sample, 
-               color = Sample)) + 
-  geom_bar(stat = "identity", 
-           width = 0.5) +
+mismatches_plt <- ggplot(df, aes(x = Sample,
+                                 y = Percent_mismatch_per_base,
+                                 fill = Sample,
+                                 color = Sample)) + 
+  geom_bar(stat = "identity", width = 0.5) +
   theme_classic() +
   scale_fill_manual(values = colors) +
   scale_color_manual(values = colors) +
@@ -379,5 +447,10 @@ ggplot(df, aes(x = Sample,
   xlab("") +
   ylab("% mismatches per nucleotide") +
   theme(legend.position = "none")
-#dev.off()
+
+pdf(file.path(fig_path, "AlignedReads_SlamSeqTest_MismatchRatePerBase.pdf"),width = 3, height = 3)
+mismatches_plt
+dev.off()
+
+mismatches_plt
 ```
