@@ -1,0 +1,210 @@
+---
+title: "GRAND-SLAM plots"
+author: "Inés Rivero-García"
+date: "31/03/2026"
+output:
+  html_document:
+    theme: "cerulean"
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup}
+knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
+library(ggplot2)
+library(dplyr)
+library(ComplexHeatmap)
+
+colors_all <- c("#BBBBBB", "#fa8072", "#ff0800", "#420d09", "#117733","#AA3377", "#EE6677", "#DDAA33")
+names(colors_all) <- c("Null", "6hours", "12hours", "24hours", "GFP", "YAP5SA", "MYC", "ERBB2")
+
+colors_experiment <- c("#BBBBBB","#117733","#AA3377", "#EE6677", "#DDAA33")
+names(colors_experiment) <- c("Null", "GFP", "YAP5SA", "MYC", "ERBB2")
+```
+
+
+# Proportion of new mRNA
+```{r new_prop_plt_all, echo=FALSE}
+new_mrna_experiment <- read.csv("data/GRAND-SLAM/cardio_slamseq_experiment.binomEstimated.tsv",
+                    header = TRUE, sep = "\t") %>%
+  mutate(Batch = "Experiment")
+
+new_mrna_test <- read.csv("data/GRAND-SLAM/cardio_slamseq_test.binomEstimated.tsv",
+                    header = TRUE, sep = "\t") %>%
+  mutate(Batch = "Test")
+
+new_mrna_all <- rbind(new_mrna_experiment, new_mrna_test)
+
+new_mrna_all <- new_mrna_all %>%
+  mutate(Sample = Condition,
+         Condition = ifelse(grepl("YAP", Condition), "YAP5SA", Condition),
+         Condition = factor(sub("_.*", "", Condition),
+                            levels = c("Null", "6hours", "12hours", "24hours", "GFP", "YAP5SA", "MYC", "ERBB2")))
+
+new_prop_plt <- new_mrna_all %>%
+  ggplot(aes(x = Condition, y = p_new, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) +
+  geom_jitter(width = 0.25) + 
+  theme_bw() +
+  scale_color_manual(values = colors_all) +
+  scale_fill_manual(values = colors_all) +
+  ylim(c(0,1)) + 
+  ylab("Proportion of new mRNA") +
+  theme(legend.position = "none")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/mismatches_proportion_all-samples.pdf",
+    height = 3, width = 4.5)
+new_prop_plt
+dev.off()
+
+new_prop_plt
+```
+```{r new_prop_plt_experiment}
+new_prop_plt_exp <- new_mrna_all %>%
+  filter(Batch == "Experiment") %>%
+  ggplot(aes(x = Condition, y = p_new, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) +
+  geom_jitter(width = 0.25) + 
+  theme_classic(base_size = 12) +
+  scale_color_manual(values = colors_experiment) +
+  scale_fill_manual(values = colors_experiment) +
+  ylim(c(0,1)) + 
+  ylab("Proportion of new mRNA") +
+  theme(legend.position = "none")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/mismatches_proportion_experiment.pdf",
+    height = 3, width = 3.5)
+new_prop_plt_exp
+dev.off()
+
+new_prop_plt_exp
+```
+
+
+# Distribution of median new-to-old ratio (NTR) per sample
+```{r ntr_distribution}
+ntr <- read.csv("data/GRAND-SLAM/cardio_slamseq_experiment.tsv",
+                header = TRUE, sep = "\t")
+
+# Select column names of MAP NTR
+keep <- c("Gene", colnames(ntr)[grep("MAP", colnames(ntr))])
+
+#' NOTE: No MAP columns for Null sample because no mRNA conversion rates could 
+#' be estimated, as this sample wasn't treated with s4U
+
+ntr <- ntr %>%
+  select(keep) %>%
+  reshape2::melt()
+
+# Rename columns
+colnames(ntr) <- c("Gene", "Sample", "MAP")
+
+# Fix sample names
+ntr <- ntr %>%
+  mutate(Sample = sub("\\.MAP$", "", as.character(Sample)),
+         Condition = sub("(_[0-9]+(\\.[0-9]+)?)?$", "", as.character(Sample)),,
+         Condition = factor(ifelse(grepl("YAP", Condition), "YAP5SA", Condition),
+                            levels = c("GFP", "YAP5SA", "MYC", "ERBB2"))
+)
+
+ntr_plt <- ntr %>%
+  ggplot(aes(x = MAP, group = Sample)) + 
+  geom_histogram(alpha = 0.25) +
+  theme_bw() +
+  facet_wrap(~ Sample) +
+  xlab("Median NTR per gene") +
+  ylab("Number of genes") +
+  theme(legend.position = "none")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/ntr_distribution_experiment.pdf", 
+    height = 4, width = 6)
+ntr_plt
+dev.off()
+
+ntr_plt
+```
+```{r ntr_grouped}
+ntr_plt_grouped <- ntr %>%
+  ggplot(aes(x = MAP, group = Sample, color = Condition)) + 
+  geom_density(alpha = 0.25) +
+  theme_bw() +
+  facet_wrap(~ Condition) +
+  xlab("Median NTR per gene") +
+  scale_color_manual(values = colors_experiment) +
+  ylab("Number of genes") +
+  theme(legend.position = "none")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/ntr_distribution_grouped_experiment.pdf", 
+    height = 4, width = 5)
+ntr_plt_grouped
+dev.off()
+
+ntr_plt_grouped
+```
+
+
+# NTR MAP correlation between samples
+```{r ntr_correlation}
+ntr_wide <- read.csv("data/GRAND-SLAM/cardio_slamseq_experiment.tsv",
+                header = TRUE, sep = "\t")
+rownames(ntr_wide) <- ntr_wide$Gene
+
+# Select column names of MAP NTR
+keep <- c(colnames(ntr_wide)[grep("MAP", colnames(ntr_wide))])
+
+ntr_wide <- ntr_wide %>%
+  select(keep) 
+
+# cor between all pairs of columns
+corDF <- corrr::correlate(ntr_wide, 
+                          method = "spearman", 
+                          use = "pairwise.complete.obs")
+rownames(corDF) <- corDF$term
+corDF <- corDF[, 2:ncol(corDF)]
+
+# Fix colnames
+colnames(corDF) <- gsub("^X|\\.MAP$", "", colnames(corDF))
+
+# Add condition annotation
+condition <- sub("_.*", "", colnames(corDF))
+condition <- sapply(condition, function (x) ifelse(x == "YAP", "YAP5SA", x))
+
+col_ha <- HeatmapAnnotation(
+  Condition = condition,
+  col = list(Condition = colors_experiment)
+)
+
+row_ha <- rowAnnotation(
+  Condition = condition,
+  col = list(Condition = colors_experiment)
+)
+
+
+ntr_cor_plt <- Heatmap(as.matrix(as.data.frame(corDF)),
+                       name = "Spearman\ncorrelation",
+                       show_row_names = TRUE,
+                       show_column_names = TRUE,
+                       column_names_centered = TRUE,
+                       bottom_annotation = col_ha,
+                       right_annotation = row_ha,
+                       col = colorRamp2(c(-1, 0, 1), c("blue", "white", "red")),
+                       cell_fun = function(j, i, x, y, width, height, fill) {
+                         if (!is.na(corDF[i, j])) {
+                           grid::grid.text(
+                             sprintf("%.2f", corDF[i, j]),
+                             x, y, gp = grid::gpar(fontsize = 10)
+                           )
+                         }
+                         }
+                       )
+
+pdf("figures/01_preprocessing/GRAND-SLAM/ntr_cor_experiment.pdf",
+    height = 4, width = 8)
+ntr_cor_plt
+dev.off()
+
+ntr_cor_plt
+
+```
