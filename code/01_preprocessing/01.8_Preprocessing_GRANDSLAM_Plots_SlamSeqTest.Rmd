@@ -1,0 +1,167 @@
+---
+title: "GRAND-SLAM plots"
+author: "Inés Rivero-García"
+date: "31/03/2026"
+output:
+  html_document:
+    theme: "cerulean"
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
+library(ggplot2)
+library(dplyr)
+library(ComplexHeatmap)
+library(circlize)
+
+condition_colors <- c("#BBBBBB", "#fa8072", "#ff0800", "#420d09")
+names(condition_colors) <- c("Null", "6hours", "12hours", "24hours")
+```
+
+
+# Proportion of new mRNA
+```{r NewProportion}
+new_mrna <- read.csv("data/GRAND-SLAM/cardio_slamseq_test.binomEstimated.tsv", 
+                    header = TRUE, sep = "\t")
+
+# Create a treatment group and order based on time
+new_mrna <- new_mrna %>%
+  mutate(Condition = factor(sub("_.*", "", Condition),
+                            levels = c("Null", "6hours", "12hours", "24hours")))
+
+prop_plt <- ggplot(new_mrna, aes(x = Condition, y = p_new, color = Condition, fill = Condition)) + 
+  geom_point() + 
+  scale_color_manual(values = condition_colors) +
+  scale_fill_manual(values = condition_colors) +
+  ylim(c(0,1)) + 
+  theme_bw() +
+  ylab("Proportion of new mRNA") +
+  theme(legend.position = "none")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/proportion_new_mrna_SlamSeqTest.pdf",
+    height = 3, width = 3)
+prop_plt
+dev.off()
+
+prop_plt
+```
+
+
+# Distribution of median new-to-old ratio (NTR) per sample
+```{r NTRdistribution}
+ntr <- read.csv("data/GRAND-SLAM/cardio_slamseq_test.tsv",
+                header = TRUE, sep = "\t")
+
+# Select column names of MAP NTR
+keep <- c("Gene", colnames(ntr)[grep("MAP", colnames(ntr))])
+
+ntr <- ntr %>%
+  select(keep) %>%
+  reshape2::melt()
+
+# Rename columns
+colnames(ntr) <- c("Gene", "Sample", "MAP")
+
+# Fix sample names
+ntr <- ntr %>%
+  mutate(Sample = sub("\\.MAP$", "", as.character(Sample)),
+         Sample = case_when(
+           Sample == "X12hours" ~ "12hours",
+           Sample == "X24hours"  ~ "24hours",
+           Sample == "X6hours"   ~ "6hours",
+           TRUE ~ Sample
+           ),
+         Sample = factor(Sample, levels = c("6hours", "12hours", "24hours"))
+         )
+
+#' NOTE: No MAP columns for Null sample because no mRNA conversion rates could 
+#' be estimated, as this sample wasn't treated with s4U
+
+ntr_plt <- ntr %>%
+  ggplot(aes(x = MAP, group = Sample, color = Sample, fill = Sample)) + 
+  geom_histogram(alpha = 0.25) +
+  scale_fill_manual(values = condition_colors) +
+  scale_color_manual(values = condition_colors) +
+  theme_bw() +
+  facet_wrap(~ Sample) +
+  xlab("Median NTR per gene") +
+  ylab("Number of genes") +
+  theme(legend.position = "none")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/ntr_distribution_SlamSeqTest.pdf", 
+    height = 3, width = 6)
+ntr_plt
+dev.off()
+
+ntr_plt
+```
+```{r ntr_distribution_together}
+ntr_distrib_plt <- ggplot(ntr, aes(x = MAP, group = Sample, color = Sample, fill = Sample)) +
+  geom_density(alpha = 0.25) +
+  scale_fill_manual(values = condition_colors) +
+  scale_color_manual(values = condition_colors) +
+  theme_bw() +
+  xlab("Median NTR per gene") +
+  ylab("Density")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/ntr_distribution_together_SlamSeqTest.pdf", 
+    height = 2.5, width = 3)
+ntr_distrib_plt
+dev.off()
+
+  
+ntr_distrib_plt
+```
+
+
+# NTR MAP correlation between samples
+```{r MAPcor}
+ntr_wide <- read.csv("data/GRAND-SLAM/cardio_slamseq_test.tsv",
+                header = TRUE, sep = "\t")
+rownames(ntr_wide) <- ntr_wide$Gene
+
+# Select column names of MAP NTR
+keep <- c(colnames(ntr_wide)[grep("MAP", colnames(ntr_wide))])
+
+ntr_wide <- ntr_wide %>%
+  select(keep) 
+
+# cor between all pairs of columns
+corDF <- corrr::correlate(ntr_wide, 
+                          method = "spearman", 
+                          use = "pairwise.complete.obs")
+rownames(corDF) <- corDF$term
+corDF <- corDF[, 2:ncol(corDF)]
+
+# Fix colnames
+colnames(corDF) <- gsub("^X|\\.MAP$", "", colnames(corDF))
+
+ntr_cor_plt <- Heatmap(as.matrix(as.data.frame(corDF)),
+                       name = "Spearman\ncorrelation",
+                       show_row_names = TRUE,
+                       show_column_names = TRUE,
+                       column_names_rot = 0,
+                       column_names_centered = TRUE,
+                       col = colorRamp2(c(-0.5, 0, 0.5), c("blue", "white", "red")),
+                       cell_fun = function(j, i, x, y, width, height, fill) {
+                         if (!is.na(corDF[i, j])) {
+                           grid::grid.text(
+                             sprintf("%.2f", corDF[i, j]),
+                             x, y, gp = grid::gpar(fontsize = 10)
+                           )
+                         }
+                         }
+                       )
+
+pdf("figures/01_preprocessing/GRAND-SLAM/ntr_cor_SlamSeqTest.pdf",
+    height = 3, width = 3.5)
+ntr_cor_plt
+dev.off()
+
+ntr_cor_plt
+```
