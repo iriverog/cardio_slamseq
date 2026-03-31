@@ -1,0 +1,227 @@
+---
+title: "GRNAD-SLAM NTR model estimation"
+author: "Inés Rivero-García"
+date: "31/03/2026"
+output: 
+  html_document:
+    theme: cerulean
+    number_sections: true
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+# SLAM-seq Test: estimate the proportion of new mRNA at different labelling pulse lenghts
+```{r setup}
+knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
+library(ggplot2)
+
+condition_colors <- c("#BBBBBB", "#fa8072", "#ff0800", "#420d09")
+names(condition_colors) <- c("Null", "6hours", "12hours", "24hours")
+
+condition_colors2 <- c("#BBBBBB", "#fa8072", "#ff0800", "#420d09")
+names(condition_colors2) <- c("0", "6", "12", "24")
+```
+
+
+```{r load_data}
+slamseq_test <- read.csv("data/GRAND-SLAM/cardio_slamseq_test.binomEstimated.tsv", 
+                    header = TRUE, sep = "\t")
+slamseq_test$Condition <- c(0, 6, 12, 24)
+
+# Prep df for model fitting
+df <- slamseq_test %>%
+  dplyr::transmute(
+    labelling_time = Condition,
+    prop_new_mrna = p_new
+  )
+```
+```{r plot_data}
+ggplot(df, aes(labelling_time, prop_new_mrna)) +
+  geom_point(size = 3) +
+  labs(x = "Pulse duration", y = "Proportion labelled mRNA") +
+  theme_bw() +
+  scale_y_continuous(limits = c(0,1))
+```
+## Fitting an assymptotic model
+$prop\ new\ mrna = A(1-e^{-k*time})$
+
+The fraction of labeled mRNA increases asymptotically, reaching a plateau of ~72%. The half-time of labeling is ~4 hours (this means after 4h around 36% of the mRNAs should be labelled. 36% is half of the max. proportion of labeled mRNA).
+```{r fit_assymptotic_model}
+#' Asymptotic model. Estimate all parameters, then check they make sense 
+#' R0 should be near 0 (0h labelling time should have prop_new_mrna = 0)
+#' Asym should be close to max(p_new)
+fit_asym <- nls(prop_new_mrna ~ SSasymp(labelling_time, Asym, R0, lrc), data = df)
+summary(fit_asym)
+print(paste0("Half-time of labelling: ",
+             round(log(2) / exp(coef(fit_asym)["lrc"])),
+      " hours"))
+```
+
+
+## Fitting a Michaelis-Menten model
+$v = {Vmax[S]} \over {Km + [S]}$, where $S$ is the proportion of new mRNA.
+
+This model estimates higher max. prop mRNA, but also sets the half-time of labelling ($Km$) to around 4 hours.
+
+```{r fit_mm_model}
+#' Michaelis-Menten model
+#' Vmax is the highest detectable prop new mRNA
+#' Km is the time needed to reach 50% of the max prop new mRNA. Value taken from assymptotic fit.
+
+fit_mm <- nls(
+  prop_new_mrna ~ (Vmax * labelling_time) / (Km + labelling_time),
+  data = df,
+  start = list(Vmax = max(slamseq_test$p_new_upper), 
+               Km = 4)
+)
+summary(fit_mm)
+```
+
+
+## Compare models
+The Michaelis-Menten model has better AIC, although both models give a very similar prediction. 
+
+```{r compare_models}
+print(paste0("Assymptotic model AIC: ", AIC(fit_asym)))
+print(paste0("Michaelis-Menten model AIC: ", AIC(fit_mm)))
+
+rmse <- function(fit) {
+  sqrt(mean(resid(fit)^2))
+}
+
+print(paste0("Assymptotic model RSEM: ", rmse(fit_asym)))
+print(paste0("Michaelis-Menten model RSEM: ", rmse(fit_mm)))
+```
+```{r inspect_residuals}
+df$res_asym <- resid(fit_asym)
+df$res_mm   <- resid(fit_mm)
+
+ggplot(df) +
+  geom_point(aes(x = labelling_time, y = res_asym), color = "orange") +
+  geom_point(aes(x = labelling_time, y = res_mm), color = "blue") +
+  theme_bw()
+```
+```{r visual_fit}
+newdat <- data.frame(labelling_time = seq(0, 24, length.out = 200))
+newdat$pred_asym <- predict(fit_asym, newdata = newdat)
+newdat$pred_mm   <- predict(fit_mm,   newdata = newdat)
+
+models_plt <- ggplot() +
+  geom_hline(color="#420d09", yintercept=max(df$prop_new_mrna), size = 0.15, linetype = 1) +
+  geom_smooth(data = df,
+              aes(x = labelling_time, y = prop_new_mrna, color = "LOESS"),
+              method = "loess", 
+              se=FALSE, 
+              linetype = 2, 
+              size = 0.5) +
+  geom_line(data = newdat, 
+            aes(x = labelling_time, y = pred_asym, color = "Asymptotic"),
+            linetype = 3, 
+            size = 0.5) +
+  geom_line(data = newdat, 
+            aes(x = labelling_time, y = pred_mm, color = "Michaelis-Menten"), 
+            linetype = 4, 
+            size = 0.5) +
+  geom_point(data = df,
+             aes(x = labelling_time,
+                 y = prop_new_mrna),
+             size = 3) +
+  theme_bw() +
+  ylim(c(0, 1)) +
+  scale_x_continuous(limits=c(0,24), breaks = seq(0, 24, 4)) +
+  scale_y_continuous(limits= c(0,1), breaks = seq(0, 1, 0.1))+
+  scale_color_manual(name = "Model",
+                     values = c("LOESS" = "black",
+                                "Asymptotic" = "orange",
+                                "Michaelis-Menten" = "darkorchid")) +
+  xlab("4-thiouridine pulse length (h)") + ylab("Proportion of new mRNA")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/model_fitting_SlamSeqTest.pdf",
+    height = 3, width = 5)
+models_plt
+dev.off()
+
+models_plt
+```
+```{r assymptotic_plot}
+assymptotic_plt <- ggplot() +
+  geom_hline(color="#420d09", yintercept=max(df$prop_new_mrna), size = 0.15, linetype = 1) +
+  geom_line(data = newdat, 
+            aes(x = labelling_time, y = pred_asym, color = "Asymptotic"),
+            linetype = 1, 
+            size = 0.5) +
+  geom_point(data = df,
+             aes(x = labelling_time,
+                 y = prop_new_mrna),
+             size = 3) +
+  theme_bw() +
+  ylim(c(0, 1)) +
+  scale_x_continuous(limits=c(0,24), breaks = seq(0, 24, 4)) +
+  scale_y_continuous(limits= c(0,1), breaks = seq(0, 1, 0.1))+
+  scale_color_manual(name = "Model",
+                     values = c("Asymptotic" = "orange")) +
+  xlab("4-thiouridine pulse length (h)") + ylab("Proportion of new mRNA")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/assymptotic_model_fitting_SlamSeqTest.pdf",
+    height = 3, width = 5)
+assymptotic_plt
+dev.off()
+
+assymptotic_plt
+```
+```{r mm_plot}
+mm_plt <- ggplot() +
+  geom_hline(color="#420d09", yintercept=max(df$prop_new_mrna), size = 0.15, linetype = 1) +
+  geom_line(data = newdat, 
+            aes(x = labelling_time, y = pred_mm, color = "Michaelis-Menten"),
+            linetype = 1, 
+            size = 0.5) +
+  geom_point(data = df,
+             aes(x = labelling_time,
+                 y = prop_new_mrna),
+             size = 3) +
+  theme_bw() +
+  ylim(c(0, 1)) +
+  scale_x_continuous(limits=c(0,24), breaks = seq(0, 24, 4)) +
+  scale_y_continuous(limits= c(0,1), breaks = seq(0, 1, 0.1))+
+  scale_color_manual(name = "Model",
+                     values = c("Michaelis-Menten" = "darkorchid")) +
+  xlab("4-thiouridine pulse length (h)") + ylab("Proportion of new mRNA")
+
+pdf("figures/01_preprocessing/GRAND-SLAM/michaelis-menten_model_fitting_SlamSeqTest.pdf",
+    height = 3, width = 5)
+mm_plt
+dev.off()
+
+mm_plt
+```
+
+
+# Relationship between mismatches
+Checking that mismatches only appear in the expected AG positions.
+```{r mismatch1, echo=FALSE}
+mismatch_df <- read.csv("data/GRAND-SLAM/cardio_slamseq_test.mismatches.tsv",
+                        header = TRUE, sep = "\t")
+
+mismatch_df <- mismatch_df %>%
+  filter(Orientation == "First") %>%
+  filter(Category == "Exonic") %>%
+  mutate(Proportion = Mismatches/Coverage,
+         Mismatch = paste0(Genomic, ">", Read),
+         Condition = factor(Condition, levels = c("Null", "6hours", "12hours", "24hours")))
+
+mismatch_plt <- ggplot(mismatch_df, aes(x = Mismatch, y = Proportion)) + 
+  geom_bar(stat = "identity") + 
+  facet_wrap(~ Condition) +
+  theme_bw() +
+  labs(y = "Proportion of mismatches", x = " Mismatch (Genomic > Read)") +
+  scale_y_continuous(limits = c(0, 0.1), breaks = seq(0, 0.1, 0.02))
+
+pdf("figures/01_preprocessing/GRAND-SLAM/mismatches_proportion_SlamSeqTest.pdf",
+    height = 4, width = 8)
+mismatch_plt
+dev.off()
+
+mismatch_plt
+```
