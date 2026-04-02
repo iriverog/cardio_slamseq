@@ -54,8 +54,9 @@ for source_file in "$datadir"/*Aligned.sortedByCoord.out.bam; do
         bam_stat.py -i $datadir/$inputfile -q 30 > "$outdir/$outputfile._RSeQC_BamStats.txt"
         echo "geneBody_coverage.py -r $refbedsorted -i $datadir/$inputfile  -o $outdir/$outputfile"
         geneBody_coverage.py -r $refbedsorted -i $datadir/$inputfile  -o "$outdir/$outputfile"
-        echo "mismatch_profile.py -l 100 -i $datadir/$inputfile -o $outdir/$outputfile -n 50000000 -q 30"
-        mismatch_profile.py -l 100 -i $datadir/$inputfile -o "$outdir/$outputfile" -n 50000000 -q 30
+        echo "mismatch_profile.py -l 97 -i $datadir/$inputfile -o $outdir/$outputfile -n 50000000 -q 30"
+        mismatch_profile.py -l 97 -i $datadir/$inputfile -o "$outdir/$outputfile" -n 50000000 -q 30
+        # Note: -l set to 97 because is the lowest average mapped read length of all samples (range 99 - 97).
         echo "read_distribution.py -i $datadir/$inputfile -r $refbedsorted > '$outdir/$outputfile.RSeQC_ReadDistribution.txt'"
         read_distribution.py -i $datadir/$inputfile -r $refbedsorted > "$outdir/$outputfile.RSeQC_ReadDistribution.txt"
         echo "read_duplication.py -i $datadir/$inputfile -o $outdir/$outputfile -u 500 -q 30"
