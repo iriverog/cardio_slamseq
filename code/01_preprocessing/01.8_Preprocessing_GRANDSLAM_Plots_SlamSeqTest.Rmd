@@ -20,7 +20,7 @@ library(ComplexHeatmap)
 library(circlize)
 
 condition_colors <- c("#BBBBBB", "#fa8072", "#ff0800", "#420d09")
-names(condition_colors) <- c("Null", "6hours", "12hours", "24hours")
+names(condition_colors) <- c("Null_0", "6hours", "12hours", "24hours")
 ```
 
 
@@ -31,8 +31,7 @@ new_mrna <- read.csv("data/GRAND-SLAM/cardio_slamseq_test.binomEstimated.tsv",
 
 # Create a treatment group and order based on time
 new_mrna <- new_mrna %>%
-  mutate(Condition = factor(sub("_.*", "", Condition),
-                            levels = c("Null", "6hours", "12hours", "24hours")))
+  mutate(Condition = factor(Condition, levels = c("Null_0", "6hours", "12hours", "24hours")))
 
 prop_plt <- ggplot(new_mrna, aes(x = Condition, y = p_new, color = Condition, fill = Condition)) + 
   geom_point() + 

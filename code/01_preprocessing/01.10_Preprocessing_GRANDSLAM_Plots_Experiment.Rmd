@@ -18,10 +18,10 @@ library(dplyr)
 library(ComplexHeatmap)
 
 colors_all <- c("#BBBBBB", "#fa8072", "#ff0800", "#420d09", "#117733","#AA3377", "#EE6677", "#DDAA33")
-names(colors_all) <- c("Null", "6hours", "12hours", "24hours", "GFP", "YAP5SA", "MYC", "ERBB2")
+names(colors_all) <- c("Null", "6hours", "12hours", "24hours", "GFP", "YAP5SA", "MYC", "caERBB2")
 
 colors_experiment <- c("#BBBBBB","#117733","#AA3377", "#EE6677", "#DDAA33")
-names(colors_experiment) <- c("Null", "GFP", "YAP5SA", "MYC", "ERBB2")
+names(colors_experiment) <- c("Null", "GFP", "YAP5SA", "MYC", "caERBB2")
 ```
 
 
@@ -40,8 +40,9 @@ new_mrna_all <- rbind(new_mrna_experiment, new_mrna_test)
 new_mrna_all <- new_mrna_all %>%
   mutate(Sample = Condition,
          Condition = ifelse(grepl("YAP", Condition), "YAP5SA", Condition),
+         Condition = ifelse(grepl("ERBB2", Condition), "caERBB2", Condition),
          Condition = factor(sub("_.*", "", Condition),
-                            levels = c("Null", "6hours", "12hours", "24hours", "GFP", "YAP5SA", "MYC", "ERBB2")))
+                            levels = c("Null", "6hours", "12hours", "24hours", "GFP", "caERBB2", "MYC", "YAP5SA")))
 
 new_prop_plt <- new_mrna_all %>%
   ggplot(aes(x = Condition, y = p_new, color = Condition, fill = Condition)) + 
@@ -104,16 +105,18 @@ colnames(ntr) <- c("Gene", "Sample", "MAP")
 # Fix sample names
 ntr <- ntr %>%
   mutate(Sample = sub("\\.MAP$", "", as.character(Sample)),
-         Condition = sub("(_[0-9]+(\\.[0-9]+)?)?$", "", as.character(Sample)),,
-         Condition = factor(ifelse(grepl("YAP", Condition), "YAP5SA", Condition),
-                            levels = c("GFP", "YAP5SA", "MYC", "ERBB2"))
+         Condition = sub("(_[0-9]+(\\.[0-9]+)?)?$", "", as.character(Sample)),
+         Condition = ifelse(grepl("YAP", Condition), "YAP5SA", Condition),
+         Condition = ifelse(grepl("ERBB2", Condition), "caERBB2", Condition),
+         Condition = factor(Condition, levels = c("GFP", "caERBB2", "MYC", "YAP5SA"))
 )
 
 ntr_plt <- ntr %>%
-  ggplot(aes(x = MAP, group = Sample)) + 
+  ggplot(aes(x = MAP, group = Sample, fill = Condition)) + 
   geom_histogram(alpha = 0.25) +
   theme_bw() +
   facet_wrap(~ Sample) +
+  scale_fill_manual(values = colors_experiment) +
   xlab("Median NTR per gene") +
   ylab("Number of genes") +
   theme(legend.position = "none")
@@ -170,6 +173,7 @@ colnames(corDF) <- gsub("^X|\\.MAP$", "", colnames(corDF))
 # Add condition annotation
 condition <- sub("_.*", "", colnames(corDF))
 condition <- sapply(condition, function (x) ifelse(x == "YAP", "YAP5SA", x))
+condition <- sapply(condition, function (x) ifelse(x == "ERBB2", "caERBB2", x))
 
 col_ha <- HeatmapAnnotation(
   Condition = condition,
