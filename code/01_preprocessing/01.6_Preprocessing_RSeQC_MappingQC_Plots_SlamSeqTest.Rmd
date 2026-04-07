@@ -1,0 +1,294 @@
+---
+title: "RSeQC plots"
+author: "Inés Rivero-García"
+date: "01/04/2026"
+output: 
+  html_document:
+    theme: cerulean
+    number_sections: true
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+```{r setup}
+library(ggplot2)
+library(readxl)
+library(dplyr)
+
+# set project root for the notebook
+knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
+
+data_path <- "results/01_preprocessing/RSeQC/"
+fig_path  <- "figures/01_preprocessing/RSeQC/"
+```
+```{r prep_data}
+df <- read.csv("data/metadata.csv", header = TRUE, sep = ",")
+
+df <- df[df$Experimental_batch == "0",]
+colors <- c("#BBBBBB", "#FA8072", "#FF0800", "#420D09") 
+names(colors) <- unique(df$Sample)
+
+df$Sample <- factor(df$Sample, levels = c("Null_0", "6hours", "12hours", "24hours"))
+samples <- df$Sample
+```
+
+# RSeQC statistics
+```{r load_gc_data}
+gc_list <- vector(mode = "list", length = length(samples))
+
+for(i in 1:length(samples)){
+  sample_name <- samples[i]
+  gc_list[[i]] <- read.delim(file = file.path(paste0(data_path, sample_name, "_R1.GC.xls"))) %>%
+    setNames(c("GC_percentage", "GC_readcount"))%>%
+    mutate(Sample = sample_name, .before = 1)
+}
+
+gc_df <- do.call(rbind, gc_list)
+gc_df <- gc_df %>% mutate(Sample = factor(Sample, levels = samples))
+head(gc_df)
+```
+```{r load_genebody_data}
+genebody_list <- vector(mode = "list", length = length(samples))
+
+for(i in 1:length(samples)){
+  sample_name <- samples[i]
+  genebody_list[[i]] <- read.delim(file = file.path(paste0(data_path, sample_name, "_R1.geneBodyCoverage.txt"))) %>%
+    .[, -1, drop = FALSE] %>%
+    as.matrix() %>%
+    t() %>%
+    as.data.frame() %>%
+    setNames("GeneBodyCoverage_ReadCount") %>%
+    mutate(Sample = sample_name, .before = 1,
+           GeneBodyCoverage_percentile = seq_len(n()))
+  rownames(genebody_list[[i]]) <- 1:nrow(genebody_list[[i]])
+}
+
+genebody_df <- do.call(rbind, genebody_list)
+genebody_df <- genebody_df %>% mutate(Sample = factor(Sample, levels = samples))
+
+head(genebody_df)
+```
+```{r load_mismatch_data}
+mismatch_columns <- c(
+  "Mismatches_ReadPosition",
+  "Mismatches_Sum",
+  "Mismatches_A2C",
+  "Mismatches_A2G",
+  "Mismatches_A2T",
+  "Mismatches_C2A",
+  "Mismatches_C2G",
+  "Mismatches_C2T",
+  "Mismatches_G2A",
+  "Mismatches_G2C",
+  "Mismatches_G2T",
+  "Mismatches_T2A",
+  "Mismatches_T2C",
+  "Mismatches_T2G"
+)
+
+mismatch_list <- vector(mode = "list", length = length(samples))
+
+for(i in 1:length(samples)){
+  sample_name <- samples[i]
+  mismatch_list[[i]] <- read.delim(file = file.path(paste0(data_path, sample_name, "_R1.mismatch_profile.xls")), skip = 1, header = TRUE) %>%
+    setNames(mismatch_columns) %>%
+    mutate(Sample = sample_name, .before = 1)
+}
+
+mismatch_df <- do.call(rbind, mismatch_list)
+mismatch_df <- mismatch_df %>% mutate(Sample = factor(Sample, levels = samples))
+head(mismatch_df)
+```
+
+
+## GC content
+```{r GCplot1}
+gc_plt1 <- ggplot(gc_df, aes(x = GC_percentage, y = GC_readcount, fill = Sample, color = Sample)) +
+  geom_bar(stat  ="identity") +
+  theme_bw() +
+  facet_wrap(~ Sample) +
+  xlab("GC %") +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  ggtitle("GC content")+
+  ylab("Number of reads")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "none")
+
+pdf(paste0(fig_path, "SlamSeqTest_RSeQC_GC_content_per_sample.pdf"),
+    height = 3.5, width = 3.5)
+gc_plt1
+dev.off()
+
+gc_plt1
+```
+
+
+```{r GCplot2}
+gc_summary_seq <- seq(0, 100)
+
+# Summarize the data the GC data into integer percentages
+gc_df2 <- gc_df %>%
+  group_by(Sample) %>%
+  mutate(
+    GC_percentage = cut(GC_percentage, 
+                        breaks = gc_summary_seq, 
+                        include.lowest = TRUE),
+    GC_readcount = as.integer(ave(GC_readcount, GC_percentage, FUN = sum))
+  )
+
+# Remove dupicated rows
+gc_df2 <- unique(gc_df2)
+gc_df2 <- as.data.frame(gc_df2)
+
+# Simplify percentages by writting min number
+gc_df2$GC_percentage <- as.character(gc_df2$GC_percentage)
+gc_df2$GC_percentage_clean <- unname(sapply(gc_df2$GC_percentage, function(x) unlist(strsplit(x, ","))[1]))
+gc_df2$GC_percentage_clean <- sub(pattern = "^\\(", replacement = "", x = gc_df2$GC_percentage_clean)
+gc_df2$GC_percentage_clean <- sub(pattern = "^\\[", replacement = "", x = gc_df2$GC_percentage_clean)
+gc_df2$GC_percentage_clean <- as.numeric(gc_df2$GC_percentage_clean)
+
+gc_plt2 <- ggplot(gc_df2, aes(x = GC_percentage_clean, y = GC_readcount, fill = Sample, color = Sample)) +
+  geom_line() +
+  theme_bw() +
+  xlab("GC %") +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  ggtitle("GC content")+
+  ylab("Number of reads")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pdf(paste0(fig_path, "SlamSeqTest_RSeQC_GC_content_together.pdf"),
+    height = 3, width = 3.5)
+gc_plt2
+dev.off()
+
+gc_plt2
+```
+
+
+## Gene Body coverage
+```{r GeneBody1}
+genebody_plt1 <- ggplot(genebody_df, aes(x = GeneBodyCoverage_percentile, y = GeneBodyCoverage_ReadCount, group = Sample, color = Sample)) +
+  geom_line() +
+  facet_wrap(~ Sample) +
+  theme_bw() +
+  xlab("Position over Gene Body (5' -> 3')")+
+  ylab("Number of reads")+
+  scale_color_manual(values = colors) +
+  ggtitle("Gene Body Coverage")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "none")
+
+pdf(paste0(fig_path, "SlamSeqTest_RSeQC_gene_body_coverage_per_sample.pdf"),
+    height = 3.5, width = 3.5)
+genebody_plt1
+dev.off()
+
+genebody_plt1
+```
+```{r GeneBody2}
+genebody_plt2 <- ggplot(genebody_df, aes(x = GeneBodyCoverage_percentile, y = GeneBodyCoverage_ReadCount, color = Sample, group = Sample)) +
+  geom_line() +
+  theme_bw() +
+  scale_color_manual(values = colors) +
+  ggtitle("Gene Body Coverage")+
+  xlab("Position along Gene Body (5' -> 3')") +
+  ylab("Number of reads")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pdf(paste0(fig_path, "SlamSeqTest_RSeQC_gene_body_coverage_together.pdf"),
+    height = 3, width = 3.5)
+genebody_plt2
+dev.off()
+
+genebody_plt2
+
+```
+
+
+## Mismatch profile
+```{r Mismatch1}
+mismatch_plt1 <- ggplot(mismatch_df, aes(group = Sample)) +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_A2C)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_A2G)), color = "red") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_A2T)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_C2A)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_C2G)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_C2T)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_G2A)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_G2C)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_G2T)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_T2A)), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_T2C)), color = "red") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = log10(Mismatches_T2G)), color = "grey60") +
+  facet_wrap(~ Sample) +
+  theme_bw() +
+  scale_y_continuous(limits = c(0,5), breaks = c(0, 1, 2, 3, 4, 5)) +
+  ggtitle("Mismatch profile along read")+
+  xlab("Position over Read (5' -> 3')")+
+  ylab("Log10(Number of mismatches)")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pdf(paste0(fig_path, "SlamSeqTest_RSeQC_mismatch_along_read_per_sample.pdf"),
+    height = 3.5, width = 4)
+mismatch_plt1
+dev.off()
+
+mismatch_plt1
+```
+
+
+```{r Mismatches2}
+mismatch_plt2 <- ggplot(mismatch_df, aes(group = Sample)) +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_A2C/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_A2G/Mismatches_Sum)*100), color = "red") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_A2T/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_C2A/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_C2G/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_C2T/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_G2A/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_G2C/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_G2T/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_T2A/Mismatches_Sum)*100), color = "grey60") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_T2C/Mismatches_Sum)*100), color = "red") +
+  geom_line(aes(x = Mismatches_ReadPosition, y = (Mismatches_T2G/Mismatches_Sum)*100), color = "grey60") +
+  facet_wrap(~ Sample) +
+  theme_bw() +
+  ggtitle("Mismatch profile along read")+
+  xlab("Position over Read (5' -> 3')")+
+  ylab("Percentage of Total Number of Mismatches")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pdf(paste0(fig_path, "SlamSeqTest_RSeQC_mismatch_percent_along_read_per_sample.pdf"),
+    height = 3.5, width = 4)
+mismatch_plt2
+dev.off()
+
+mismatch_plt2
+```
+```{r Mismatches3}
+MeanMismatches <- reshape2::melt(mismatch_df, id.vars = c("Sample", "Mismatches_ReadPosition"))
+MeanMismatches$ReadPosition <- as.numeric(MeanMismatches$Mismatches_ReadPosition)
+
+mismatch_plt3 <- ggplot(MeanMismatches, aes(x = ReadPosition, y = log10(value), group = Sample, color = Sample)) +
+  geom_line() +
+  facet_wrap(~ variable, scales = "free_x") +
+  theme_bw() +
+  scale_color_manual(values = colors) +
+  ggtitle("Mismatches along read")+
+  xlab("Position along Read (5' -> 3')")+
+  ylab("Log10(Number of Mismatches)")+
+  scale_y_continuous(limits = c(0, 6), breaks = c(0, 2, 4, 6)) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position="right")+
+  guides(color=guide_legend(nrow=7,byrow=TRUE))
+
+pdf(paste0(fig_path, "SlamSeqTest_RSeQC_mismatch_per_change.pdf"),
+    height = 5, width = 6)
+mismatch_plt3
+dev.off()
+
+mismatch_plt3
+```
