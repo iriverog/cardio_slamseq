@@ -804,7 +804,6 @@ for(gene in collectri_genes){
 
 
 # Enrichment analysis
-CONTINUE here! I need to (1) get databases, (2) prepare ranks using stats, (3) run fgsea and (4) make pretty plots
 ```{r load_genesets}
 reactome <- gmtPathways("data/External/MSigDB_Mmusculus/m2.cp.reactome.v2023.1.Mm.symbols.gmt")
 go_bp <- gmtPathways("data/External/MSigDB_Mmusculus/m5.go.bp.v2023.1.Mm.symbols.gmt")
