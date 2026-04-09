@@ -1,0 +1,387 @@
+---
+title: "Visualize topic models to choose topic model with best k for total RNA"
+author: "Inés Rivero-García"
+date: "04/09/2026"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
+library(Matrix)
+library(fastTopics)
+library(ggplot2)
+library(DESeq2)
+library(ComplexHeatmap)
+set.seed(1)
+```
+
+
+# Topic analysis for total reads
+```{r load_total_data}
+# Load full expression matrix and prepare colors for plotting.
+data <- read.csv("data/GRAND-SLAM/cardio_slamseq_experiment.tsv", header = TRUE, sep = "\t")
+
+# Now we split the GFPs in batches to check if the topic model reduces batch effects.
+sampleinfo <- c("ERBB2", "ERBB2", "ERBB2", "GFP1", "GFP1", "GFP1", "GFP2", "GFP2", "GFP2", "MYC", "MYC", "MYC", "YAP5SA", "YAP5SA", "YAP5SA")
+condition_colors <- c("#DDAA33", "darkolivegreen2", "darkolivegreen", "#EE6677", "#AA3377")
+names(condition_colors) <- c("ERBB2", "GFP1", "GFP2", "MYC", "YAP5SA")
+
+topic_colors <- c("#1F77B4", "#FF7F0E", "#D62728", "#9467BD", "#7F7F7F", "#17BECF")
+names(topic_colors) <- c("Topic1", "Topic2", "Topic3", "Topic4", "Topic5", "Topic6")
+
+# Load total DEGs
+yap.total.DEG <- read.csv("results/02_degs/YAP5SA_vs_GFP/YAP5SA_vs_GFP_degs_lfcShrinkage_total.tsv", header = TRUE, sep = "\t")
+erbb2.total.DEG <- read.csv("results/02_degs/caERBB2_vs_GFP/caERBB2_vs_GFP_degs_lfcShrinkage_total.tsv", header = TRUE, sep = "\t")
+myc.total.DEG <- read.csv("results/02_degs/MYC_vs_GFP/MYC_vs_GFP_degs_lfcShrinkage_total.tsv", header = TRUE, sep = "\t")
+
+yap.total.DEG <- yap.total.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+erbb2.total.DEG <- erbb2.total.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+myc.total.DEG <- myc.total.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+
+total.degs <- unique(c(yap.total.DEG, erbb2.total.DEG, myc.total.DEG))
+
+# Prepare DF with raw counts per sample
+total <- data %>%
+  dplyr::select(ends_with(c("Symbol","Gene", ".Readcount"))) %>%
+  group_by(Symbol) %>%
+  summarise(Gene = dplyr::first(Gene), across(where(is.numeric), sum), .groups = "drop") %>%
+  dplyr::select(starts_with(c("Symbol", "ERBB2", "GFP", "MYC", "YAP"))) %>%
+  filter(Symbol != "", !is.na(Symbol)) %>%
+  as.data.frame()
+
+# Add gene names
+rownames(total) <- total$Symbol
+total <- total[, -1] # Remove column with gene symbols
+
+# Filter matrix to keep DEGs
+total <- total[total.degs,]
+
+# Transform matrix for compatibility with fastTopics
+total <- t(as.matrix(total))
+
+fit.total.k2 <- readRDS("results/03_topic_modelling/topic_model_k2_total.rds")
+fit.total.k3 <- readRDS("results/03_topic_modelling/topic_model_k3_total.rds")
+fit.total.k4 <- readRDS("results/03_topic_modelling/topic_model_k4_total.rds")
+fit.total.k5 <- readRDS("results/03_topic_modelling/topic_model_k5_total.rds")
+fit.total.k6 <- readRDS("results/03_topic_modelling/topic_model_k6_total.rds")
+
+de.total.k2 <- readRDS("results/03_topic_modelling/topic_degs_k2_total.rds")
+de.total.k3 <- readRDS("results/03_topic_modelling/topic_degs_k3_total.rds")
+de.total.k4 <- readRDS("results/03_topic_modelling/topic_degs_k4_total.rds")
+de.total.k5 <- readRDS("results/03_topic_modelling/topic_degs_k5_total.rds")
+de.total.k6 <- readRDS("results/03_topic_modelling/topic_degs_k6_total.rds")
+```
+
+
+## Choose best k
+```{r choose_k_bplot}
+total.proportion.df.k2 <- as.data.frame(fit.total.k2$L)
+total.proportion.df.k3 <- as.data.frame(fit.total.k3$L)
+total.proportion.df.k4 <- as.data.frame(fit.total.k4$L)
+total.proportion.df.k5 <- as.data.frame(fit.total.k5$L)
+total.proportion.df.k6 <- as.data.frame(fit.total.k6$L)
+
+# Add sample info
+total.proportion.df.k2$Sample <- rownames(total.proportion.df.k2)
+total.proportion.df.k3$Sample <- rownames(total.proportion.df.k3)
+total.proportion.df.k4$Sample <- rownames(total.proportion.df.k4)
+total.proportion.df.k5$Sample <- rownames(total.proportion.df.k5)
+total.proportion.df.k6$Sample <- rownames(total.proportion.df.k6)
+
+# Melt for ggplot2
+total.proportion.df.k2 <- reshape2::melt(total.proportion.df.k2)
+total.proportion.df.k3 <- reshape2::melt(total.proportion.df.k3)
+total.proportion.df.k4 <- reshape2::melt(total.proportion.df.k4)
+total.proportion.df.k5 <- reshape2::melt(total.proportion.df.k5)
+total.proportion.df.k6 <- reshape2::melt(total.proportion.df.k6)
+
+# Fix colnames
+colnames(total.proportion.df.k2) <- c("Sample", "Topic", "Proportion")
+colnames(total.proportion.df.k3) <- c("Sample", "Topic", "Proportion")
+colnames(total.proportion.df.k4) <- c("Sample", "Topic", "Proportion")
+colnames(total.proportion.df.k5) <- c("Sample", "Topic", "Proportion")
+colnames(total.proportion.df.k6) <- c("Sample", "Topic", "Proportion")
+
+# Fix topic names
+total.proportion.df.k2$Topic <- gsub(pattern = "k", replacement = "Topic", total.proportion.df.k2$Topic)
+total.proportion.df.k3$Topic <- gsub(pattern = "k", replacement = "Topic", total.proportion.df.k3$Topic)
+total.proportion.df.k4$Topic <- gsub(pattern = "k", replacement = "Topic", total.proportion.df.k4$Topic)
+total.proportion.df.k5$Topic <- gsub(pattern = "k", replacement = "Topic", total.proportion.df.k5$Topic)
+total.proportion.df.k6$Topic <- gsub(pattern = "k", replacement = "Topic", total.proportion.df.k6$Topic)
+
+# Plot barplots
+bplot_k2 <- ggplot(total.proportion.df.k2, aes(x = Sample, y = Proportion, fill = Topic)) + 
+  geom_col(color = "black") + 
+  theme_bw() + 
+  coord_flip() + 
+  ggtitle("k2") +
+  scale_fill_manual(values = topic_colors) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+bplot_k3 <- ggplot(total.proportion.df.k3, aes(x = Sample, y = Proportion, fill = Topic)) + 
+  geom_col(color = "black") + 
+  theme_bw() + 
+  coord_flip() + 
+  ggtitle("k3") +
+  scale_fill_manual(values = topic_colors) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+bplot_k4 <- ggplot(total.proportion.df.k4, aes(x = Sample, y = Proportion, fill = Topic)) + 
+  geom_col(color = "black") + 
+  theme_bw() + 
+  coord_flip() + 
+  ggtitle("k4") +
+  scale_fill_manual(values = topic_colors) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+bplot_k5 <- ggplot(total.proportion.df.k5, aes(x = Sample, y = Proportion, fill = Topic)) + 
+  geom_col(color = "black") + 
+  theme_bw() + 
+  coord_flip() + 
+  ggtitle("k5") +
+  scale_fill_manual(values = topic_colors) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+bplot_k6 <- ggplot(total.proportion.df.k6, aes(x = Sample, y = Proportion, fill = Topic)) + 
+  geom_col(color = "black") + 
+  theme_bw() + 
+  coord_flip() + 
+  ggtitle("k6") +
+  scale_fill_manual(values = topic_colors) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# Save plots
+pdf("figures/03_topic_modelling/topic_degs_k2_total_barplot.pdf", height = 3, width = 4)
+bplot_k2
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k3_total_barplot.pdf", height = 3, width = 4)
+bplot_k3
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_barplot.pdf", height = 3, width = 4)
+bplot_k4
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k5_total_barplot.pdf", height = 3, width = 4)
+bplot_k5
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k6_total_barplot.pdf", height = 3, width = 4)
+bplot_k6
+dev.off()
+
+# Show barplots
+bplot_k2
+bplot_k3
+bplot_k4
+bplot_k5
+bplot_k6
+```
+```{r choose_k_pca}
+pca_k2 <- pca_plot(fit.total.k2, fill = sampleinfo) + 
+  geom_point(size = 3, aes(color = sampleinfo)) + 
+  scale_color_manual(values = condition_colors) +
+  ggtitle("k2") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pca_k3 <- pca_plot(fit.total.k3, fill = sampleinfo) + 
+  geom_point(size = 3, aes(color = sampleinfo)) + 
+  scale_color_manual(values = condition_colors) +
+  ggtitle("k3") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pca_k4 <- pca_plot(fit.total.k4, fill = sampleinfo) + 
+  geom_point(size = 3, aes(color = sampleinfo)) + 
+  scale_color_manual(values = condition_colors) +
+  ggtitle("k4") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pca_k5 <- pca_plot(fit.total.k5, fill = sampleinfo) + 
+  geom_point(size = 3, aes(color = sampleinfo)) + 
+  scale_color_manual(values = condition_colors) +
+  ggtitle("k5") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pca_k6 <- pca_plot(fit.total.k6, fill = sampleinfo) + 
+  geom_point(size = 3, aes(color = sampleinfo)) + 
+  scale_color_manual(values = condition_colors) +
+  ggtitle("k6") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pdf("figures/03_topic_modelling/topic_degs_k2_total_pca.pdf", height = 3, width = 4)
+pca_k2
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k3_total_pca.pdf", height = 3, width = 4)
+pca_k3
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_pca.pdf", height = 3, width = 4)
+pca_k4
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k5_total_pca.pdf", height = 3, width = 4)
+pca_k5
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k6_total_pca.pdf", height = 3, width = 4)
+pca_k6
+dev.off()
+
+
+pca_k2
+pca_k3
+pca_k4
+pca_k5
+pca_k5
+```
+
+
+```{r choose_k_hmap}
+# Assign genes to topics based on maxscore
+gene.topic.total.k2 <- apply(fit.total.k2$F, 1, function(x) which(x == max(x)))
+gene.topic.total.k2 <- as.character(gene.topic.total.k2)
+names(gene.topic.total.k2) <- rownames(fit.total.k2$F)
+gene.topic.total.k2 <- sapply(gene.topic.total.k2, function(x) paste0("Topic",x))
+gene.topic.total.k2 <- gene.topic.total.k2[order(gene.topic.total.k2)]
+
+gene.topic.total.k3 <- apply(fit.total.k3$F, 1, function(x) which(x == max(x)))
+gene.topic.total.k3 <- as.character(gene.topic.total.k3)
+names(gene.topic.total.k3) <- rownames(fit.total.k3$F)
+gene.topic.total.k3 <- sapply(gene.topic.total.k3, function(x) paste0("Topic",x))
+gene.topic.total.k3 <- gene.topic.total.k3[order(gene.topic.total.k3)]
+
+gene.topic.total.k4 <- apply(fit.total.k4$F, 1, function(x) which(x == max(x)))
+gene.topic.total.k4 <- as.character(gene.topic.total.k4)
+names(gene.topic.total.k4) <- rownames(fit.total.k4$F)
+gene.topic.total.k4 <- sapply(gene.topic.total.k4, function(x) paste0("Topic",x))
+gene.topic.total.k4 <- gene.topic.total.k4[order(gene.topic.total.k4)]
+
+gene.topic.total.k5 <- apply(fit.total.k5$F, 1, function(x) which(x == max(x)))
+gene.topic.total.k5 <- as.character(gene.topic.total.k5)
+names(gene.topic.total.k5) <- rownames(fit.total.k5$F)
+gene.topic.total.k5 <- sapply(gene.topic.total.k5, function(x) paste0("Topic",x))
+gene.topic.total.k5 <- gene.topic.total.k5[order(gene.topic.total.k5)]
+
+gene.topic.total.k6 <- apply(fit.total.k6$F, 1, function(x) which(x == max(x)))
+gene.topic.total.k6 <- as.character(gene.topic.total.k6)
+names(gene.topic.total.k6) <- rownames(fit.total.k6$F)
+gene.topic.total.k6 <- sapply(gene.topic.total.k6, function(x) paste0("Topic",x))
+gene.topic.total.k6 <- gene.topic.total.k6[order(gene.topic.total.k6)]
+
+# Standarize expression data for heatmap.
+coldata <- data.frame(Sample = rownames(total), Condition = sampleinfo)
+
+dds.total <- DESeqDataSetFromMatrix(countData = round(t(total)),
+                                    colData = coldata,
+                                    design = ~ Condition)
+vsd.total <- vst(dds.total, blind = FALSE)
+scaled.total <- scale(t(assay(vsd.total)))
+
+# Filter matrices to keep genes in model
+scaled.total.k2 <- scaled.total[,names(gene.topic.total.k2)]
+scaled.total.k3 <- scaled.total[,names(gene.topic.total.k3)]
+scaled.total.k4 <- scaled.total[,names(gene.topic.total.k4)]
+scaled.total.k5 <- scaled.total[,names(gene.topic.total.k5)]
+scaled.total.k6 <- scaled.total[,names(gene.topic.total.k6)]
+
+# Fix rownames
+rownames(scaled.total.k2) <- gsub(pattern = ".Readcount", replacement = "", x = rownames(scaled.total.k2))
+rownames(scaled.total.k3) <- gsub(pattern = ".Readcount", replacement = "", x = rownames(scaled.total.k3))
+rownames(scaled.total.k4) <- gsub(pattern = ".Readcount", replacement = "", x = rownames(scaled.total.k4))
+rownames(scaled.total.k5) <- gsub(pattern = ".Readcount", replacement = "", x = rownames(scaled.total.k5))
+rownames(scaled.total.k6) <- gsub(pattern = ".Readcount", replacement = "", x = rownames(scaled.total.k6))
+
+# Prepare sample annotations
+column_ha = HeatmapAnnotation(Condition = sampleinfo, col = list(Condition = condition_colors))
+
+# Preparee topic annotations
+row_ha.k2 = rowAnnotation(Topic = gene.topic.total.k2, col = list(Topic = topic_colors[1:2]))
+row_ha.k3 = rowAnnotation(Topic = gene.topic.total.k3, col = list(Topic = topic_colors[1:3]))
+row_ha.k4 = rowAnnotation(Topic = gene.topic.total.k4, col = list(Topic = topic_colors[1:4]))
+row_ha.k5 = rowAnnotation(Topic = gene.topic.total.k5, col = list(Topic = topic_colors[1:5]))
+row_ha.k6 = rowAnnotation(Topic = gene.topic.total.k6, col = list(Topic = topic_colors[1:6]))
+
+hmap_k2 <- Heatmap(t(scaled.total.k2), 
+                   cluster_rows = FALSE, 
+                   show_row_names = FALSE, 
+                   left_annotation = row_ha.k2, 
+                   top_annotation = column_ha,
+                   name = "z-score",
+                   column_title = "Topics for total reads and k = 2")
+
+hmap_k3 <- Heatmap(t(scaled.total.k3), 
+                   cluster_rows = FALSE, 
+                   show_row_names = FALSE, 
+                   left_annotation = row_ha.k3, 
+                   top_annotation = column_ha,
+                   name = "z-score",
+                   column_title = "Topics for total reads and k = 3")
+
+hmap_k4 <- Heatmap(t(scaled.total.k4), 
+                   cluster_rows = FALSE, 
+                   show_row_names = FALSE, 
+                   left_annotation = row_ha.k4, 
+                   top_annotation = column_ha,
+                   name = "z-score",
+                   column_title = "Topics for total reads and k = 4")
+
+hmap_k5 <- Heatmap(t(scaled.total.k5), 
+                   cluster_rows = FALSE, 
+                   show_row_names = FALSE, 
+                   left_annotation = row_ha.k5, 
+                   top_annotation = column_ha,
+                   name = "z-score",
+                   column_title = "Topics for total reads and k = 5")
+
+hmap_k6 <- Heatmap(t(scaled.total.k6), 
+                   cluster_rows = FALSE, 
+                   show_row_names = FALSE, 
+                   left_annotation = row_ha.k6, 
+                   top_annotation = column_ha,
+                   name = "z-score",
+                   column_title = "Topics for total reads and k = 6")
+
+pdf("figures/03_topic_modelling/topic_degs_k2_total_hmap.pdf", height = 3, width = 4)
+hmap_k2
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k3_total_hmap.pdf", height = 3, width = 4)
+hmap_k3
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_hmap.pdf", height = 3, width = 4)
+hmap_k4
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k5_total_hmap.pdf", height = 3, width = 4)
+hmap_k5
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k6_total_hmap.pdf", height = 3, width = 4)
+hmap_k6
+dev.off()
+
+hmap_k2
+hmap_k3
+hmap_k4
+hmap_k5
+hmap_k6
+```
+
+
+## Conclusion
+**Convergence plots**: Models with k=2 and k=3 have weird starts to the convergence plots, while models with k=4, k=5 and k=6 look better.
+
+
+**Topic distribution per samples**: Models with k=2 and k=3 omly capture batch effects. Additionally, the PCA for model with k=2 has very small values. Model with k=6 on the other hand might be too granular, as it captures one topic per condition but cannot really separate conditions from GFPs. Models with k=4 and k=5 give similar results.
+
+**We select model with k=4 as final, because it's the best balance between capturing biological variability and model simplicity**.
+

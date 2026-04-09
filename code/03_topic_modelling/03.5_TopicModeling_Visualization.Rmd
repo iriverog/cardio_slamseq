@@ -1,0 +1,888 @@
+---
+title: "07.5_TopicModeling_Visualization"
+author: "Inés Rivero-García"
+date: "2/29/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Volumes/INTENSO/PhD/cardio_slamseq/")
+library(Matrix)
+library(fastTopics)
+library(ggplot2)
+library(ggpubr)
+library(DESeq2)
+library(dplyr)
+library(fgsea)
+library(ComplexHeatmap)
+library(tidyr)
+set.seed(1)
+
+# Load database for enrichment
+#file.exists("data/External/MSigDB_Mmusculus/m2.cp.reactome.v2023.1.Mm.symbols.gmt")
+m2 <- gmtPathways("/Volumes/INTENSO/PhD/cardio_slamseq/data/External/MSigDB_Mmusculus/m2.cp.reactome.v2023.1.Mm.symbols.gmt")
+m5.bp <- gmtPathways("/Volumes/INTENSO/PhD/cardio_slamseq/data/External/MSigDB_Mmusculus/m5.go.bp.v2023.1.Mm.symbols.gmt")
+```
+
+
+# Topic analysis for total reads
+```{r load_total_data}
+# Load full expression matrix and prepare colors for plotting.
+data <- read.csv("data/GRAND-SLAM/cardio_slamseq_experiment.tsv", header = TRUE, sep = "\t")
+
+# Now we split the GFPs in batches to check if the topic model reduces batch effects.
+Condition <- c("ERBB2", "ERBB2", "ERBB2", "GFP", "GFP", "GFP", "GFP", "GFP", "GFP", "MYC", "MYC", "MYC", "YAP5SA", "YAP5SA", "YAP5SA")
+condition_colors <- c("#DDAA33", "#117733", "#EE6677", "#AA3377")
+names(condition_colors) <- c("ERBB2", "GFP", "MYC", "YAP5SA")
+
+total_topic_colors <- c("#fcba65", "#cfa3ee", "#8c9d57", "#1a3a12")
+names(total_topic_colors) <- c("Topic1", "Topic2", "Topic3", "Topic4")
+
+# Load total DEGs
+yap.total.DEG <- read.csv("results/02_degs/YAP5SA_vs_GFP/YAP5SA_vs_GFP_degs_lfcShrinkage_total.tsv", header = TRUE, sep = "\t")
+erbb2.total.DEG <- read.csv("results/02_degs/caERBB2_vs_GFP/caERBB2_vs_GFP_degs_lfcShrinkage_total.tsv", header = TRUE, sep = "\t")
+myc.total.DEG <- read.csv("results/02_degs/MYC_vs_GFP/MYC_vs_GFP_degs_lfcShrinkage_total.tsv", header = TRUE, sep = "\t")
+
+yap.total.DEG <- yap.total.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+erbb2.total.DEG <- erbb2.total.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+myc.total.DEG <- myc.total.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+
+total.degs <- unique(c(yap.total.DEG, erbb2.total.DEG, myc.total.DEG))
+
+# Prepare DF with raw counts per sample
+total <- data %>%
+  dplyr::select(ends_with(c("Symbol","Gene", ".Readcount"))) %>%
+  group_by(Symbol) %>%
+  summarise(Gene = dplyr::first(Gene), across(where(is.numeric), sum), .groups = "drop") %>%
+  dplyr::select(starts_with(c("Symbol", "ERBB2", "GFP", "MYC", "YAP"))) %>%
+  filter(Symbol != "", !is.na(Symbol)) %>%
+  as.data.frame()
+
+# Add gene names
+rownames(total) <- total$Symbol
+total <- total[, -1] # Remove column with gene symbols
+
+# Filter matrix to keep DEGs
+total <- total[total.degs,]
+
+# Transform matrix for compatibility with fastTopics
+total <- t(as.matrix(total))
+
+fit.total.k4 <- readRDS("results/03_topic_modelling/topic_model_k4_total.rds")
+de.total.k4 <- readRDS("results/03_topic_modelling/topic_degs_k4_total.rds")
+```
+
+
+```{r total_bplot}
+total.proportion.df.k4 <- as.data.frame(fit.total.k4$L)
+
+# Add sample info
+total.proportion.df.k4$Sample <- rownames(total.proportion.df.k4)
+
+# Melt for ggplot2
+total.proportion.df.k4 <- reshape2::melt(total.proportion.df.k4)
+
+# Fix colnames
+colnames(total.proportion.df.k4) <- c("Sample", "Topic", "Proportion")
+
+# Fix topic names
+total.proportion.df.k4$Topic <- gsub(pattern = "k", replacement = "Topic", total.proportion.df.k4$Topic)
+
+# Plot barplot
+bplot_k4 <- ggplot(total.proportion.df.k4, aes(x = Sample, y = Proportion, fill = Topic)) + 
+  geom_col(color = "black") + 
+  theme_bw() + 
+  coord_flip() + 
+  ggtitle("k4") +
+  scale_fill_manual(values = total_topic_colors) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# Save plot
+pdf("figures/03_topic_modelling/topic_degs_k4_total_barplot_final.pdf", height = 3, width = 4)
+bplot_k4
+dev.off()
+
+bplot_k4
+```
+
+
+```{r total_topic_heatmap, echo=FALSE}
+# Assign genes to topics based on maxscore
+gene.topic.total.k4 <- apply(fit.total.k4$F, 1, function(x) which(x == max(x)))
+gene.topic.total.k4 <- as.character(gene.topic.total.k4)
+names(gene.topic.total.k4) <- rownames(fit.total.k4$F)
+gene.topic.total.k4 <- sapply(gene.topic.total.k4, function(x) paste0("Topic",x))
+gene.topic.total.k4 <- gene.topic.total.k4[order(gene.topic.total.k4)]
+
+# Standarize expression data for heatmap.
+coldata <- data.frame(Sample = rownames(total), Condition = Condition)
+
+dds.total <- DESeqDataSetFromMatrix(countData = round(t(total)),
+                                    colData = coldata,
+                                    design = ~ Condition)
+vsd.total <- vst(dds.total, blind = FALSE)
+scaled.total <- scale(t(assay(vsd.total)))
+
+# Filter matrices to keep genes in model
+scaled.total.k4 <- scaled.total[,names(gene.topic.total.k4)]
+
+# Fix rownames
+rownames(scaled.total.k4) <- gsub(pattern = ".Readcount", replacement = "", x = rownames(scaled.total.k4))
+
+# Prepare sample annotations
+column_ha = HeatmapAnnotation(Condition = Condition, col = list(Condition = condition_colors))
+
+# Preparee topic annotations
+row_ha.k4 = rowAnnotation(Topic = gene.topic.total.k4, col = list(Topic = total_topic_colors))
+
+hmap_k4 <- Heatmap(t(scaled.total.k4), 
+                   cluster_rows = FALSE, 
+                   show_row_names = FALSE, 
+                   left_annotation = row_ha.k4, 
+                   top_annotation = column_ha,
+                   name = "z-score",
+                   column_title = "Topics for total reads and k = 4")
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_hmap_final.pdf", height = 3, width = 4)
+hmap_k4
+dev.off()
+
+hmap_k4
+```
+```{r total_topic_pca, echo=FALSE}
+pca_k4 <- pca_plot(fit.total.k4, fill = Condition) + 
+  geom_point(size = 3, aes(color = Condition)) + 
+  scale_color_manual(values = condition_colors) +
+  ggtitle("Topic model for total reads (k=4)") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_pca_final.pdf", height = 3, width = 4)
+pca_k4
+dev.off()
+
+pca_k4
+```
+```{r total_topic_anova, echo=FALSE}
+# Anova to associate topics with conditions
+total.prop.topic1 <- fit.total.k4$L[, 1]
+total.prop.topic2 <- fit.total.k4$L[, 2]
+total.prop.topic3 <- fit.total.k4$L[, 3]
+total.prop.topic4 <- fit.total.k4$L[, 4]
+
+total.prob.topic.list <- list(total.prop.topic1, total.prop.topic2, total.prop.topic3, total.prop.topic4)
+aov.total4.pvalues <- c()
+pairwise_results <- list()
+
+for(i in 1:length(total.prob.topic.list)){
+  # ANOVA.
+  aov.topic <- aov(lm(total.prob.topic.list[[i]] ~ Condition))
+  aov.total4.pvalues <- c(aov.total4.pvalues, summary(aov.topic)[[1]][["Pr(>F)"]][1])
+  
+  print(plot(aov.topic$residuals)) # Check independence of residuals
+  print(shapiro.test(aov.topic$residuals)) # Check normality of residuals
+  print(bartlett.test(aov.topic$residuals ~ Condition)) # Check sample homoscedasticity
+  
+  # Pairwise post hoc test (Tukey)
+  tuk <- TukeyHSD(aov.topic, "Condition")$Condition
+  tuk_df <- as.data.frame(tuk)
+  tuk_df$comparison <- rownames(tuk_df)
+
+  tuk_df <- tuk_df %>%
+    separate(comparison, into = c("group1", "group2"), sep = "-") %>%
+    mutate(
+      p.adj = `p adj`,
+      p.label = case_when(
+        p.adj <= 0.0001 ~ "****",
+        p.adj <= 0.001  ~ "***",
+        p.adj <= 0.01   ~ "**",
+        p.adj <= 0.05   ~ "*",
+        TRUE            ~ "ns"
+      )
+    )
+
+  pairwise_results[[i]] <- tuk_df
+}
+
+plotdf <- data.frame(Topic1 = total.prop.topic1, Topic2 = total.prop.topic2, Topic3 = total.prop.topic3, Topic4 = total.prop.topic4, Condition = Condition)
+
+aov.total4.padjs <- p.adjust(aov.total4.pvalues, method = "bonferroni")
+
+# Add y positions for significance bars
+pairwise_results[[1]]$y.position <- seq(0.8, by = 0.1, length.out = nrow(pairwise_results[[1]]))
+pairwise_results[[2]]$y.position <- seq(0.8, by = 0.1, length.out = nrow(pairwise_results[[2]]))
+pairwise_results[[3]]$y.position <- seq(0.9, by = 0.1, length.out = nrow(pairwise_results[[3]]))
+pairwise_results[[4]]$y.position <- seq(0.85, by = 0.1, length.out = nrow(pairwise_results[[4]]))
+
+p1 <- ggplot(plotdf, aes(x = Condition, y = Topic1, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) + 
+  geom_point(position = position_jitter(width = 0.1)) + 
+  scale_color_manual(values = condition_colors) + 
+  scale_fill_manual(values = condition_colors) + 
+  theme_bw() +
+  #ylim(c(0,1.3))+
+  ylab("Grade of membership")+
+  ggtitle("Topic 1") +
+  labs(subtitle = paste0("Anova padj = ", round(aov.total4.padjs[1], 4))) +
+  stat_pvalue_manual(pairwise_results[[1]], label = "p.label", xmin = "group1", xmax = "group2", y.position = "y.position", tip.length = 0.01, hide.ns = FALSE)  +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none",
+        plot.subtitle = element_text(hjust = 0.5))
+
+p2 <- ggplot(plotdf, aes(x = Condition, y = Topic2, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) + 
+  geom_point(position = position_jitter(width = 0.1)) + 
+  scale_color_manual(values = condition_colors) + 
+  scale_fill_manual(values = condition_colors) + 
+  theme_bw() +
+  #ylim(c(0,1.3))+
+  ylab("Grade of membership")+
+  ggtitle("Topic 2") +
+  labs(subtitle = paste0("Anova padj = ", round(aov.total4.padjs[2], 4))) +
+  stat_pvalue_manual(pairwise_results[[2]], label = "p.label", xmin = "group1", xmax = "group2", y.position = "y.position", tip.length = 0.01, hide.ns = FALSE)  +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none",
+        plot.subtitle = element_text(hjust = 0.5))
+
+p3 <- ggplot(plotdf, aes(x = Condition, y = Topic3, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) + 
+  geom_point(position = position_jitter(width = 0.1)) + 
+  scale_color_manual(values = condition_colors) + 
+  scale_fill_manual(values = condition_colors) + 
+  theme_bw() +
+  #ylim(c(0,1.25))+
+  ylab("Grade of membership")+
+  ggtitle("Topic 3") +
+  labs(subtitle = paste0("Anova padj = ", round(aov.total4.padjs[3], 4))) +
+  stat_pvalue_manual(pairwise_results[[3]], label = "p.label", xmin = "group1", xmax = "group2", y.position = "y.position", tip.length = 0.01, hide.ns = FALSE)  +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none",
+        plot.subtitle = element_text(hjust = 0.5))
+
+p4 <- ggplot(plotdf, aes(x = Condition, y = Topic4, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) + 
+  geom_point(position = position_jitter(width = 0.1)) + 
+  scale_color_manual(values = condition_colors) + 
+  scale_fill_manual(values = condition_colors) + 
+  theme_bw() +
+  #ylim(c(0,1.25))+
+  ylab("Grade of membership")+
+  ggtitle("Topic 4") +
+  labs(subtitle = paste0("Anova padj = ", round(aov.total4.padjs[4], 4))) +
+  stat_pvalue_manual(pairwise_results[[1]], label = "p.label", xmin = "group1", xmax = "group2", y.position = "y.position", tip.length = 0.01, hide.ns = FALSE)  +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none",
+        plot.subtitle = element_text(hjust = 0.5))
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_boxplot_topic1_final.pdf", height = 3, width = 3)
+p1
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_boxplot_topic2_final.pdf", height = 3, width = 3)
+p2
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_boxplot_topic3_final.pdf", height = 3, width = 3)
+p3
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_boxplot_topic4_final.pdf", height = 3, width = 3)
+p4
+dev.off()
+
+p1
+p2
+p3
+p4
+```
+```{r total_topic_ora}
+# Prepare gene set each topic
+total.topic1.genesymbol <- names(gene.topic.total.k4[gene.topic.total.k4 == "Topic1"])
+total.topic2.genesymbol <- names(gene.topic.total.k4[gene.topic.total.k4 == "Topic2"])
+total.topic3.genesymbol <- names(gene.topic.total.k4[gene.topic.total.k4 == "Topic3"])
+total.topic4.genesymbol <- names(gene.topic.total.k4[gene.topic.total.k4 == "Topic4"])
+
+# Get universe
+universe <- unique(data$Symbol[!is.na(data$Symbol)])
+universe <- universe[universe != ""]
+
+# Run fORA
+total.topic1.m5bp.ora <- fora(pathways = m5.bp, genes = total.topic1.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+total.topic2.m5bp.ora <- fora(pathways = m5.bp, genes = total.topic2.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+total.topic3.m5bp.ora <- fora(pathways = m5.bp, genes = total.topic3.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+total.topic4.m5bp.ora <- fora(pathways = m5.bp, genes = total.topic4.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+
+total.topic1.m2.ora <- fora(pathways = m2, genes = total.topic1.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+total.topic2.m2.ora <- fora(pathways = m2, genes = total.topic2.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+total.topic3.m2.ora <- fora(pathways = m2, genes = total.topic3.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+total.topic4.m2.ora <- fora(pathways = m2, genes = total.topic4.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+
+total.topic1.m5bp.ora$Topic <- "Topic1"
+total.topic2.m5bp.ora$Topic <- "Topic2"
+total.topic3.m5bp.ora$Topic <- "Topic3"
+total.topic4.m5bp.ora$Topic <- "Topic4"
+
+total.topic1.m2.ora$Topic <- "Topic1"
+total.topic2.m2.ora$Topic <- "Topic2"
+total.topic3.m2.ora$Topic <- "Topic3"
+total.topic4.m2.ora$Topic <- "Topic4"
+
+total.topic1.m5bp.ora$Database <- "GO Biological Process"
+total.topic2.m5bp.ora$Database <- "GO Biological Process"
+total.topic3.m5bp.ora$Database <- "GO Biological Process"
+total.topic4.m5bp.ora$Database <- "GO Biological Process"
+
+total.topic1.m2.ora$Database <- "REACTOME"
+total.topic2.m2.ora$Database <- "REACTOME"
+total.topic3.m2.ora$Database <- "REACTOME"
+total.topic4.m2.ora$Database <- "REACTOME"
+
+total.m5bp.ora <- rbind(total.topic1.m5bp.ora, total.topic2.m5bp.ora, total.topic3.m5bp.ora, total.topic4.m5bp.ora)
+total.m5bp.ora$overlapGenes <- unlist(lapply(total.m5bp.ora$overlapGenes, function(x) paste0(x, collapse = ";")))
+total.m5bp.ora.significant <- total.m5bp.ora %>% filter(padj < 0.05)
+
+total.m2.ora <- rbind(total.topic1.m2.ora, total.topic2.m2.ora, total.topic3.m2.ora, total.topic4.m2.ora)
+total.m2.ora$overlapGenes <- unlist(lapply(total.m2.ora$overlapGenes, function(x) paste0(x, collapse = ";")))
+total.m2.ora.significant <- total.m2.ora %>% filter(padj < 0.05)
+
+write.table(as.data.frame(total.m5bp.ora.significant), "results/03_topic_modelling/topic_model_k4_total_fgsea_go-bp.tsv", 
+            col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+
+write.table(as.data.frame(total.m2.ora.significant), "results/03_topic_modelling/topic_model_k4_total_fgsea_reactome.tsv", 
+            col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+
+# Pretty names for top10 pathways per topic
+total.m5bp.ora.significant <- total.m5bp.ora.significant %>%
+  # Clean pathway names
+  mutate(pathway_clean = pathway %>%
+           stringr::str_remove("^GOBP_") %>%
+           stringr::str_replace_all("_", " ") %>%
+           stringr::str_to_lower() %>%
+           stringr::str_to_title())%>%
+  # Rank within Topic by significance
+  group_by(Topic) %>%
+  arrange(padj, .by_group = TRUE) %>% 
+  mutate(pathway_plot = if_else(row_number() <= 10, pathway_clean,NA)) %>%
+  ungroup()
+total.m5bp.ora.significant$Topic <- factor(total.m5bp.ora.significant$Topic, levels = c("Topic1", "Topic2", "Topic3", "Topic4"))
+
+# Pretty names for top10 pathways per topic
+total.m2.ora.significant <- total.m2.ora.significant %>%
+  # Clean pathway names
+  mutate(pathway_clean = pathway %>%
+           stringr::str_remove("^REACTOME_") %>%
+           stringr::str_replace_all("_", " ") %>%
+           stringr::str_to_lower() %>%
+           stringr::str_to_title())%>%
+  # Rank within Topic by significance
+  group_by(Topic) %>%
+  arrange(padj, .by_group = TRUE) %>% 
+  mutate(pathway_plot = if_else(row_number() <= 10, pathway_clean,NA)) %>%
+  ungroup()
+total.m2.ora.significant$Topic <- factor(total.m2.ora.significant$Topic, levels = c("Topic1", "Topic2", "Topic3", "Topic4"))
+
+p1 <- total.m5bp.ora.significant %>%
+  filter(Topic == "Topic1") %>%
+  filter(!is.na(pathway_plot)) %>%
+  ggplot(aes(x = reorder(pathway_plot, -log10(padj)), y = -log10(padj), size = overlap)) + 
+  geom_point(color = total_topic_colors[1]) +
+  coord_flip() + 
+  theme_bw() +
+  xlab("") +
+  ylab("- Log10(adjusted p-value)") + 
+  ggtitle("Topic 1")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+
+p2 <- total.m5bp.ora.significant %>%
+  filter(Topic == "Topic2") %>%
+  filter(!is.na(pathway_plot)) %>%
+  ggplot(aes(x = reorder(pathway_plot, -log10(padj)), y = -log10(padj), size = overlap)) + 
+  geom_point(color = total_topic_colors[2]) +
+  coord_flip() + 
+  theme_bw() +
+  xlab("") +
+  ylab("- Log10(adjusted p-value)") + 
+  ggtitle("Topic 2")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+
+p3 <- total.m5bp.ora.significant %>%
+  filter(Topic == "Topic3") %>%
+  filter(!is.na(pathway_plot)) %>%
+  ggplot(aes(x = reorder(pathway_plot, -log10(padj)), y = -log10(padj), size = overlap)) + 
+  geom_point(color = total_topic_colors[3]) +
+  coord_flip() + 
+  theme_bw() +
+  xlab("") +
+  ylab("- Log10(adjusted p-value)") + 
+  ggtitle("Topic 3")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+
+p4 <- total.m5bp.ora.significant %>%
+  filter(Topic == "Topic4") %>%
+  filter(!is.na(pathway_plot)) %>%
+  ggplot(aes(x = reorder(pathway_plot, -log10(padj)), y = -log10(padj), size = overlap)) + 
+  geom_point(color = total_topic_colors[4]) +
+  coord_flip() + 
+  theme_bw() +
+  xlab("") +
+  ylab("- Log10(adjusted p-value)") + 
+  ggtitle("Topic 4")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_ora_topic1_dotplot_final.pdf", height = 4, width = 6)
+p1
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_ora_topic2_dotplot_final.pdf", height = 4, width = 6)
+p2
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_ora_topic3_dotplot_final.pdf", height = 4, width = 6)
+p3
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_ora_topic4_dotplot_final.pdf", height = 4, width = 6)
+p4
+dev.off()
+
+p1
+p2
+p3
+p4
+```
+
+
+# Topic analysis for SLAM reads.
+```{r load_labeled_data, echo=FALSE}
+# Load full expression matrix and prepare colors for plotting.
+data <- read.csv("data/GRAND-SLAM/cardio_slamseq_experiment.tsv", header = TRUE, sep = "\t")
+
+# Now we split the GFPs in batches to check if the topic model reduces batch effects.
+Condition <- c("ERBB2", "ERBB2", "ERBB2", "GFP", "GFP", "GFP", "GFP", "GFP", "GFP", "MYC", "MYC", "MYC", "YAP5SA", "YAP5SA", "YAP5SA")
+condition_colors <- c("#DDAA33", "#117733", "#EE6677", "#AA3377")
+names(condition_colors) <- c("ERBB2", "GFP", "MYC", "YAP5SA")
+
+topic_colors <- c("#cfa3ee", "#fcba65", "#548f01")
+names(topic_colors) <- c("Topic1", "Topic2", "Topic3")
+
+# Load total DEGs
+yap.labeled.DEG <- read.csv("results/02_degs/YAP5SA_vs_GFP/YAP5SA_vs_GFP_degs_lfcShrinkage_labeled.tsv", header = TRUE, sep = "\t")
+erbb2.labeled.DEG <- read.csv("results/02_degs/caERBB2_vs_GFP/caERBB2_vs_GFP_degs_lfcShrinkage_labeled.tsv", header = TRUE, sep = "\t")
+myc.labeled.DEG <- read.csv("results/02_degs/MYC_vs_GFP/MYC_vs_GFP_degs_lfcShrinkage_labeled.tsv", header = TRUE, sep = "\t")
+
+yap.labeled.DEG <- yap.labeled.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+erbb2.labeled.DEG <- erbb2.labeled.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+myc.labeled.DEG <- myc.labeled.DEG %>% filter(padj < 0.1) %>% pull(Symbol)
+
+labeled.degs <- unique(c(yap.labeled.DEG, erbb2.labeled.DEG, myc.labeled.DEG))
+
+# Clean data to make it a little smaller and separate between total and labeled counts
+total <- data %>%
+  dplyr::select(Gene, Symbol, ERBB2_1.Readcount, ERBB2_2.Readcount, ERBB2_3.Readcount, GFP_1.1.Readcount, GFP_1.2.Readcount, GFP_1.3.Readcount, GFP_2.1.Readcount, GFP_2.2.Readcount, GFP_2.3.Readcount,
+                MYC_1.Readcount, MYC_2.Readcount, MYC_3.Readcount, YAP_1.Readcount, YAP_2.Readcount, YAP_3.Readcount)
+labeled <- total
+NTR <- data %>%
+  dplyr::select(ERBB2_1.MAP, ERBB2_2.MAP, ERBB2_3.MAP, GFP_1.1.MAP, GFP_1.2.MAP, GFP_1.3.MAP, GFP_2.1.MAP, GFP_2.2.MAP, GFP_2.3.MAP, MYC_1.MAP, MYC_2.MAP, MYC_3.MAP, YAP_1.MAP, YAP_2.MAP, YAP_3.MAP)
+
+# Labeled counts = raw counts * median new-to-old ratio
+labeled[, 3:ncol(labeled)] <- round(labeled[, 3:ncol(labeled)] * NTR)
+
+# Remove rows with unmeasured NTRs
+labeled <- labeled[complete.cases(labeled), ]
+
+# Collapse to gene symbol for interpretability
+labeled <- labeled %>%
+  group_by(Symbol) %>%
+  summarise(
+    Gene = dplyr::first(Gene),
+    across(where(is.numeric), sum),
+    .groups = "drop"
+  )
+labeled <- as.data.frame(labeled)
+rownames(labeled) <- labeled$Symbol
+labeled <- labeled %>% filter(Symbol != "", !is.na(Symbol))
+
+# Remove column with gene symbols and ensembl IDs
+labeled <- labeled[, 3:ncol(labeled)] 
+
+# Filter matrix to keep DEGs. There's 4 DEGs that do not appear in the processed matrix with all samples because they had missing MAP values for some samples from other conditions.
+keep <- intersect(labeled.degs, rownames(labeled))
+labeled <- labeled[keep,]
+
+# Transform matrix for compatibility with fastTopics
+labeled <- t(as.matrix(labeled))
+
+fit.labeled.k3 <- readRDS("results/03_topic_modelling/topic_model_k3_labeled.rds")
+de.labeled.k3 <- readRDS("results/03_topic_modelling/topic_degs_k3_labeled.rds")
+```
+
+
+## Broad topic analysis
+```{r labeled_bplot}
+labeled.proportion.df.k3 <- as.data.frame(fit.labeled.k3$L)
+
+# Add sample info
+labeled.proportion.df.k3$Sample <- rownames(labeled.proportion.df.k3)
+
+# Melt for ggplot2
+labeled.proportion.df.k3 <- reshape2::melt(labeled.proportion.df.k3)
+
+# Fix colnames
+colnames(labeled.proportion.df.k3) <- c("Sample", "Topic", "Proportion")
+
+# Fix topic names
+labeled.proportion.df.k3$Topic <- gsub(pattern = "k", replacement = "Topic", labeled.proportion.df.k3$Topic)
+
+# Plot barplot
+bplot_k3 <- ggplot(labeled.proportion.df.k3, aes(x = Sample, y = Proportion, fill = Topic)) + 
+  geom_col(color = "black") + 
+  theme_bw() + 
+  coord_flip() + 
+  ggtitle("k3") +
+  scale_fill_manual(values = total_topic_colors) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# Save plot
+pdf("figures/03_topic_modelling/topic_degs_k3_labeled_barplot_final.pdf", height = 3, width = 4)
+bplot_k3
+dev.off()
+
+bplot_k3
+```
+
+
+```{r labeled_topic_heatmap, echo=FALSE}
+# Assign genes to topics based on maxscore
+gene.topic.labeled.k3 <- apply(fit.labeled.k3$F, 1, function(x) which(x == max(x)))
+gene.topic.labeled.k3 <- as.character(gene.topic.labeled.k3)
+names(gene.topic.labeled.k3) <- rownames(fit.labeled.k3$F)
+gene.topic.labeled.k3 <- sapply(gene.topic.labeled.k3, function(x) paste0("Topic",x))
+gene.topic.labeled.k3 <- gene.topic.labeled.k3[order(gene.topic.labeled.k3)]
+
+# Standarize expression data for heatmap.
+coldata <- data.frame(Sample = rownames(labeled), Condition = Condition)
+
+dds.labeled <- DESeqDataSetFromMatrix(countData = round(t(labeled)),
+                                    colData = coldata,
+                                    design = ~ Condition)
+vsd.labeled <- varianceStabilizingTransformation(dds.labeled, blind = FALSE)
+scaled.labeled <- scale(t(assay(vsd.labeled)))
+
+# Filter matrices to keep genes in model
+scaled.labeled.k3 <- scaled.labeled[,names(gene.topic.labeled.k3)]
+
+# Fix rownames
+rownames(scaled.labeled.k3) <- gsub(pattern = ".Readcount", replacement = "", x = rownames(scaled.labeled.k3))
+
+# Prepare sample annotations
+column_ha = HeatmapAnnotation(Condition = Condition, col = list(Condition = condition_colors))
+
+# Preparee topic annotations
+row_ha.k3 = rowAnnotation(Topic = gene.topic.labeled.k3, col = list(Topic = total_topic_colors))
+
+hmap_k3 <- Heatmap(t(scaled.labeled.k3), 
+                   cluster_rows = FALSE, 
+                   show_row_names = FALSE, 
+                   left_annotation = row_ha.k3, 
+                   top_annotation = column_ha,
+                   name = "z-score",
+                   column_title = "Topics for labeled reads and k = 3")
+
+pdf("figures/03_topic_modelling/topic_degs_k3_labeled_hmap_final.pdf", height = 3, width = 4)
+hmap_k3
+dev.off()
+
+hmap_k3
+```
+
+
+```{r labeled_topic_pca, echo=FALSE}
+pca_k3 <- pca_plot(fit.labeled.k3, fill = Condition) + 
+  geom_point(size = 3, aes(color = Condition)) + 
+  scale_color_manual(values = condition_colors) +
+  ggtitle("Topic model for labeled reads (k=3)") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pdf("figures/03_topic_modelling/topic_degs_k3_labeled_pca_final.pdf", height = 3, width = 4)
+pca_k3
+dev.off()
+
+pca_k3
+```
+
+
+```{r labeled_topic_anova, echo=FALSE}
+# Anova to associate topics with conditions
+labeled.prop.topic1 <- fit.labeled.k3$L[, 1]
+labeled.prop.topic2 <- fit.labeled.k3$L[, 2]
+labeled.prop.topic3 <- fit.labeled.k3$L[, 3]
+
+labeled.prob.topic.list <- list(labeled.prop.topic1, labeled.prop.topic2, labeled.prop.topic3)
+aov.labeled3.pvalues <- c()
+pairwise_results <- list()
+
+for(i in 1:length(labeled.prob.topic.list)){
+  # ANOVA.
+  aov.topic <- aov(lm(labeled.prob.topic.list[[i]] ~ Condition))
+  aov.labeled3.pvalues <- c(aov.labeled3.pvalues, summary(aov.topic)[[1]][["Pr(>F)"]][1])
+  
+  print(plot(aov.topic$residuals)) # Check independence of residuals
+  print(shapiro.test(aov.topic$residuals)) # Check normality of residuals
+  print(bartlett.test(aov.topic$residuals ~ Condition)) # Check sample homoscedasticity
+  
+  # Pairwise post hoc test (Tukey)
+  tuk <- TukeyHSD(aov.topic, "Condition")$Condition
+  tuk_df <- as.data.frame(tuk)
+  tuk_df$comparison <- rownames(tuk_df)
+
+  tuk_df <- tuk_df %>%
+    separate(comparison, into = c("group1", "group2"), sep = "-") %>%
+    mutate(
+      p.adj = `p adj`,
+      p.label = case_when(
+        p.adj <= 0.0001 ~ "****",
+        p.adj <= 0.001  ~ "***",
+        p.adj <= 0.01   ~ "**",
+        p.adj <= 0.05   ~ "*",
+        TRUE            ~ "ns"
+      )
+    )
+
+  pairwise_results[[i]] <- tuk_df
+}
+
+plotdf <- data.frame(Topic1 = labeled.prop.topic1, Topic2 = labeled.prop.topic2, Topic3 = labeled.prop.topic3, Condition = Condition)
+
+aov.labeled3.padjs <- p.adjust(aov.labeled3.pvalues, method = "bonferroni")
+
+# Add y positions for significance bars
+pairwise_results[[1]]$y.position <- seq(0.8, by = 0.1, length.out = nrow(pairwise_results[[1]]))
+pairwise_results[[2]]$y.position <- seq(0.8, by = 0.1, length.out = nrow(pairwise_results[[2]]))
+pairwise_results[[3]]$y.position <- seq(0.9, by = 0.1, length.out = nrow(pairwise_results[[3]]))
+
+p1 <- ggplot(plotdf, aes(x = Condition, y = Topic1, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) + 
+  geom_point(position = position_jitter(width = 0.1)) + 
+  scale_color_manual(values = condition_colors) + 
+  scale_fill_manual(values = condition_colors) + 
+  theme_bw() +
+  #ylim(c(0,1.3))+
+  ylab("Grade of membership")+
+  ggtitle("Topic 1") +
+  labs(subtitle = paste0("Anova padj = ", round(aov.total4.padjs[1], 4))) +
+  stat_pvalue_manual(pairwise_results[[1]], label = "p.label", xmin = "group1", xmax = "group2", y.position = "y.position", tip.length = 0.01, hide.ns = FALSE)  +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none",
+        plot.subtitle = element_text(hjust = 0.5))
+
+p2 <- ggplot(plotdf, aes(x = Condition, y = Topic2, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) + 
+  geom_point(position = position_jitter(width = 0.1)) + 
+  scale_color_manual(values = condition_colors) + 
+  scale_fill_manual(values = condition_colors) + 
+  theme_bw() +
+  #ylim(c(0,1.3))+
+  ylab("Grade of membership")+
+  ggtitle("Topic 2") +
+  labs(subtitle = paste0("Anova padj = ", round(aov.total4.padjs[2], 4))) +
+  stat_pvalue_manual(pairwise_results[[2]], label = "p.label", xmin = "group1", xmax = "group2", y.position = "y.position", tip.length = 0.01, hide.ns = FALSE)  +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none",
+        plot.subtitle = element_text(hjust = 0.5))
+
+p3 <- ggplot(plotdf, aes(x = Condition, y = Topic3, color = Condition, fill = Condition)) + 
+  geom_boxplot(alpha = 0.3) + 
+  geom_point(position = position_jitter(width = 0.1)) + 
+  scale_color_manual(values = condition_colors) + 
+  scale_fill_manual(values = condition_colors) + 
+  theme_bw() +
+  #ylim(c(0,1.25))+
+  ylab("Grade of membership")+
+  ggtitle("Topic 3") +
+  labs(subtitle = paste0("Anova padj = ", round(aov.total4.padjs[3], 4))) +
+  stat_pvalue_manual(pairwise_results[[3]], label = "p.label", xmin = "group1", xmax = "group2", y.position = "y.position", tip.length = 0.01, hide.ns = FALSE)  +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none",
+        plot.subtitle = element_text(hjust = 0.5))
+
+pdf("figures/03_topic_modelling/topic_degs_k3_labeled_boxplot_topic1_final.pdf", height = 3, width = 3)
+p1
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k3_labeled_boxplot_topic2_final.pdf", height = 3, width = 3)
+p2
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k3_labeled_boxplot_topic3_final.pdf", height = 3, width = 3)
+p3
+dev.off()
+
+p1
+p2
+p3
+```
+
+
+```{r labeled_topic_ora}
+# Prepare gene set each topic
+labeled.topic1.genesymbol <- names(gene.topic.labeled.k3[gene.topic.labeled.k3 == "Topic1"])
+labeled.topic2.genesymbol <- names(gene.topic.labeled.k3[gene.topic.labeled.k3 == "Topic2"])
+labeled.topic3.genesymbol <- names(gene.topic.labeled.k3[gene.topic.labeled.k3 == "Topic3"])
+
+# Get universe
+universe <- unique(data$Symbol[!is.na(data$Symbol)])
+universe <- universe[universe != ""]
+
+# Run fORA
+labeled.topic1.m5bp.ora <- fora(pathways = m5.bp, genes = labeled.topic1.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+labeled.topic2.m5bp.ora <- fora(pathways = m5.bp, genes = labeled.topic2.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+labeled.topic3.m5bp.ora <- fora(pathways = m5.bp, genes = labeled.topic3.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+
+labeled.topic1.m2.ora <- fora(pathways = m2, genes = labeled.topic1.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+labeled.topic2.m2.ora <- fora(pathways = m2, genes = labeled.topic2.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+labeled.topic3.m2.ora <- fora(pathways = m2, genes = labeled.topic3.genesymbol, universe = universe, minSize = 10, maxSize = 500)
+
+labeled.topic1.m5bp.ora$Topic <- "Topic1"
+labeled.topic2.m5bp.ora$Topic <- "Topic2"
+labeled.topic3.m5bp.ora$Topic <- "Topic3"
+
+labeled.topic1.m2.ora$Topic <- "Topic1"
+labeled.topic2.m2.ora$Topic <- "Topic2"
+labeled.topic3.m2.ora$Topic <- "Topic3"
+
+labeled.topic1.m5bp.ora$Database <- "GO Biological Process"
+labeled.topic2.m5bp.ora$Database <- "GO Biological Process"
+labeled.topic3.m5bp.ora$Database <- "GO Biological Process"
+
+labeled.topic1.m2.ora$Database <- "REACTOME"
+labeled.topic2.m2.ora$Database <- "REACTOME"
+labeled.topic3.m2.ora$Database <- "REACTOME"
+
+labeled.m5bp.ora <- rbind(labeled.topic1.m5bp.ora, labeled.topic2.m5bp.ora, labeled.topic3.m5bp.ora)
+labeled.m5bp.ora$overlapGenes <- unlist(lapply(labeled.m5bp.ora$overlapGenes, function(x) paste0(x, collapse = ";")))
+labeled.m5bp.ora.significant <- labeled.m5bp.ora %>% filter(padj < 0.05)
+
+labeled.m2.ora <- rbind(labeled.topic1.m2.ora, labeled.topic2.m2.ora, labeled.topic3.m2.ora)
+labeled.m2.ora$overlapGenes <- unlist(lapply(labeled.m2.ora$overlapGenes, function(x) paste0(x, collapse = ";")))
+labeled.m2.ora.significant <- labeled.m2.ora %>% filter(padj < 0.05)
+
+write.table(as.data.frame(labeled.m5bp.ora.significant), "results/03_topic_modelling/topic_model_k3_labeled_fgsea_go-bp.tsv", 
+            col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+
+write.table(as.data.frame(labeled.m2.ora.significant), "results/03_topic_modelling/topic_model_k3_labeled_fgsea_reactome.tsv", 
+            col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+
+# Pretty names for top10 pathways per topic
+labeled.m5bp.ora.significant <- labeled.m5bp.ora.significant %>%
+  # Clean pathway names
+  mutate(pathway_clean = pathway %>%
+           stringr::str_remove("^GOBP_") %>%
+           stringr::str_replace_all("_", " ") %>%
+           stringr::str_to_lower() %>%
+           stringr::str_to_title())%>%
+  # Rank within Topic by significance
+  group_by(Topic) %>%
+  arrange(padj, .by_group = TRUE) %>% 
+  mutate(pathway_plot = if_else(row_number() <= 10, pathway_clean,NA)) %>%
+  ungroup()
+labeled.m5bp.ora.significant$Topic <- factor(labeled.m5bp.ora.significant$Topic, levels = c("Topic1", "Topic2", "Topic3"))
+
+# Pretty names for top10 pathways per topic
+labeled.m2.ora.significant <- labeled.m2.ora.significant %>%
+  # Clean pathway names
+  mutate(pathway_clean = pathway %>%
+           stringr::str_remove("^REACTOME_") %>%
+           stringr::str_replace_all("_", " ") %>%
+           stringr::str_to_lower() %>%
+           stringr::str_to_title())%>%
+  # Rank within Topic by significance
+  group_by(Topic) %>%
+  arrange(padj, .by_group = TRUE) %>% 
+  mutate(pathway_plot = if_else(row_number() <= 10, pathway_clean,NA)) %>%
+  ungroup()
+labeled.m2.ora.significant$Topic <- factor(labeled.m2.ora.significant$Topic, levels = c("Topic1", "Topic2", "Topic3"))
+
+p1 <- labeled.m5bp.ora.significant %>%
+  filter(Topic == "Topic1") %>%
+  filter(!is.na(pathway_plot)) %>%
+  ggplot(aes(x = reorder(pathway_plot, -log10(padj)), y = -log10(padj), size = overlap)) + 
+  geom_point(color = total_topic_colors[1]) +
+  coord_flip() + 
+  theme_bw() +
+  xlab("") +
+  ylab("- Log10(adjusted p-value)") + 
+  ggtitle("Topic 1")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+
+p2 <- labeled.m5bp.ora.significant %>%
+  filter(Topic == "Topic2") %>%
+  filter(!is.na(pathway_plot)) %>%
+  ggplot(aes(x = reorder(pathway_plot, -log10(padj)), y = -log10(padj), size = overlap)) + 
+  geom_point(color = total_topic_colors[2]) +
+  coord_flip() + 
+  theme_bw() +
+  xlab("") +
+  ylab("- Log10(adjusted p-value)") + 
+  ggtitle("Topic 2")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+
+p3 <- labeled.m5bp.ora.significant %>%
+  filter(Topic == "Topic3") %>%
+  filter(!is.na(pathway_plot)) %>%
+  ggplot(aes(x = reorder(pathway_plot, -log10(padj)), y = -log10(padj), size = overlap)) + 
+  geom_point(color = total_topic_colors[3]) +
+  coord_flip() + 
+  theme_bw() +
+  xlab("") +
+  ylab("- Log10(adjusted p-value)") + 
+  ggtitle("Topic 3")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom")
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_ora_topic1_dotplot_final.pdf", height = 4, width = 6)
+p1
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_ora_topic2_dotplot_final.pdf", height = 4, width = 6)
+p2
+dev.off()
+
+pdf("figures/03_topic_modelling/topic_degs_k4_total_ora_topic3_dotplot_final.pdf", height = 4, width = 6)
+p3
+dev.off()
+
+p1
+p2
+p3
+```
+# Comparison of total and SLAM topics.
+```{r topic_comparison, echo = FALSE}
+topic.comparison.df <- data.frame(TotalTopic = c(rep("Topic1", 3), rep("Topic2", 3), rep("Topic3", 3), rep("Topic4", 3)),
+                                  LabeledTopic = c(rep(c("Topic1", "Topic2", "Topic3"), 4)),
+                                  NrCommonGenes = NA)
+
+for(i in 1:nrow(topic.comparison.df)){
+  totaltopic <- topic.comparison.df[i, "TotalTopic"]
+  labeledtopic <- topic.comparison.df[i, "LabeledTopic"]
+  topic.comparison.df[i, "NrCommonGenes"] <- length(intersect(names(gene.topic.total.k4[gene.topic.total.k4 == totaltopic]), 
+                                                              names(gene.topic.labeled.k3[gene.topic.labeled.k3 == labeledtopic])))
+}
+
+comparison_plt <- ggplot(topic.comparison.df, aes(x = LabeledTopic, y = TotalTopic, fill = NrCommonGenes)) + 
+  geom_tile(color = "black") +
+  theme_classic() +
+  #ggtitle("Comparison between total topics (k=4) and labeled topics (k=3)") +
+  ylab("Total topics") +
+  xlab("SLAM topics") +
+  scale_fill_gradient(low = "white", high = "purple") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+pdf("figures/03_topic_modelling/comparison_total-k4_labeled-k3.pdf", height = 3, width = 4)
+comparison_plt
+dev.off()
+
+comparison_plt
+```
+
+
