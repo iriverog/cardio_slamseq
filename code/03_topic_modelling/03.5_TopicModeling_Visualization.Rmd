@@ -884,5 +884,15 @@ dev.off()
 
 comparison_plt
 ```
+# Save topic genes
+```{r save_topic_genes_total}
+saveRDS(total.topic1.genesymbol, "results/03_topic_modelling/topic_model_k4_total_topic1_genes.rds")
+saveRDS(total.topic2.genesymbol, "results/03_topic_modelling/topic_model_k4_total_topic2_genes.rds")
+saveRDS(total.topic3.genesymbol, "results/03_topic_modelling/topic_model_k4_total_topic3_genes.rds")
+saveRDS(total.topic4.genesymbol, "results/03_topic_modelling/topic_model_k4_total_topic4_genes.rds")
 
+saveRDS(labeled.topic1.genesymbol, "results/03_topic_modelling/topic_model_k3_labeled_topic1_genes.rds")
+saveRDS(labeled.topic1.genesymbol, "results/03_topic_modelling/topic_model_k3_labeled_topic2_genes.rds")
+saveRDS(labeled.topic1.genesymbol, "results/03_topic_modelling/topic_model_k3_labeled_topic3_genes.rds")
+```
 
